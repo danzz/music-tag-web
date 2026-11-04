@@ -59,12 +59,65 @@ class TaskViewSets(GenericViewSet):
         """文件列表"""
         validate_data = self.is_validated_data(request.data)
         file_path = validate_data['file_path']
-        sorted_fields = validate_data['sorted_fields']
-        file_path_list = file_path.split('/')
+        sorted_fields = validate_data.get('sorted_fields', [])
+        only_dir = validate_data.get('only_dir', False)
+        file_path_list = [p for p in file_path.split('/') if p]
         try:
-            data = os.scandir(file_path)
+            data = list(os.scandir(file_path))
         except FileNotFoundError:
             return self.failure_response(msg="文件夹不存在")
+        except PermissionError:
+            return self.failure_response(msg="无权限访问该文件夹")
+
+        if only_dir:
+            dir_children = []
+            dir_index = 1
+            for entry in data:
+                try:
+                    if entry.is_dir():
+                        dir_name = entry.name.encode('utf-8', 'replace').decode()
+                        has_sub = False
+                        try:
+                            with os.scandir(entry.path) as sub_entries:
+                                for sub in sub_entries:
+                                    if sub.is_dir():
+                                        has_sub = True
+                                        break
+                        except Exception:
+                            pass
+
+                        node_info = {
+                            "id": dir_index,
+                            "name": dir_name,
+                            "title": dir_name,
+                            "path": os.path.normpath(entry.path.encode('utf-8', 'replace').decode()),
+                            "icon": "icon-folder",
+                            "is_dir": True
+                        }
+                        if has_sub:
+                            node_info["async"] = True
+                        else:
+                            node_info["children"] = []
+                            node_info["async"] = False
+
+                        dir_children.append(node_info)
+                        dir_index += 1
+                except Exception:
+                    continue
+            dir_children = sorted(dir_children, key=lambda x: x.get("name").encode('gbk', "ignore"), reverse=False)
+            res_data = [
+                {
+                    "name": file_path_list[-1] if file_path_list else file_path,
+                    "title": file_path_list[-1] if file_path_list else file_path,
+                    "path": os.path.normpath(file_path),
+                    "expanded": True,
+                    "id": 0,
+                    "children": dir_children,
+                    "icon": "icon-folder",
+                    "is_dir": True
+                }
+            ]
+            return self.success_response(data=res_data)
         children_data = []
         frc_map = {}
         file_data = []

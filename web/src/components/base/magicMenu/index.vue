@@ -70,6 +70,7 @@
 }
 .bk-wrapper .bk-navigation-wrapper .navigation-container .container-content {
     padding: 0;
+    overflow: hidden !important;
 }
 .bk-navigation-header {
     background-color: #ffffff !important;

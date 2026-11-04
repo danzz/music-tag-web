@@ -7,7 +7,8 @@ from applications.task.models import TaskRecord, Task
 
 class FileListSerializer(serializers.Serializer):
     file_path = serializers.CharField(required=True)
-    sorted_fields = serializers.ListField(required=True)
+    sorted_fields = serializers.ListField(required=False, default=list)
+    only_dir = serializers.BooleanField(required=False, default=False)
 
 
 class Id3Serializer(serializers.Serializer):

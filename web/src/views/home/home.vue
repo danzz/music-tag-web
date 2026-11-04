@@ -1,71 +1,336 @@
 <template>
-    <div style="display: flex;flex-wrap: wrap;">
-        <div class="file-section">
-            <div style="width: 95%;margin-top: 20px;margin-left: 10px;">
-                <div style="display: flex;align-items: center;">
-                    <bk-icon type="arrows-left-shape" @click="backDir" style="cursor: pointer;"></bk-icon>
-                    <bk-input :clearable="true" v-model="filePath"
-                        @enter="handleSearchFile"
-                        :placeholder="'请输入文件夹路径：'"
-                        behavior="simplicity">
+    <div class="home-main-layout">
+        <!-- 顶部智能目录导航栏 -->
+        <div class="top-nav-bar">
+            <!-- 左侧快捷动作 -->
+            <div class="top-nav-left">
+                <bk-button size="small" :text="true" @click="backDir" :disabled="isAtRoot" class="nav-act-btn" title="返回上一级目录">
+                    <bk-icon type="arrows-left-shape" style="font-size: 15px; margin-right: 4px;"></bk-icon> 上级
+                </bk-button>
+                <bk-button size="small" :text="true" @click="refreshDir" class="nav-act-btn" title="刷新当前目录">
+                    <bk-icon type="refresh" style="font-size: 14px; margin-right: 4px;"></bk-icon> 刷新
+                </bk-button>
+            </div>
+
+            <!-- 中间面包屑导航或路径直接编辑 -->
+            <div class="top-nav-center">
+                <div v-if="!isEditingPath" class="path-breadcrumb-wrap">
+                    <div class="path-breadcrumb">
+                        <span class="path-segment root-segment" @click="navigateToPath('/')" title="跳转至根目录 /">
+                            <bk-icon type="folder-open" style="margin-right: 4px; color: #3a84ff;"></bk-icon>
+                            <span>根目录</span>
+                        </span>
+                        <template v-for="(seg, idx) in pathSegments">
+                            <span class="path-separator" :key="'sep-' + idx">/</span>
+                            <span class="path-segment" :key="'seg-' + idx" @click="navigateToSegment(idx)" :title="'跳转至 ' + seg.path">
+                                {{ seg.name }}
+                            </span>
+                        </template>
+                    </div>
+                    <span class="edit-path-btn" @click="startEditPath" title="点击手动输入/粘贴路径">
+                        <bk-icon type="edit"></bk-icon>
+                    </span>
+                </div>
+                <div v-else class="path-input-wrap">
+                    <bk-input
+                        ref="pathInputRef"
+                        v-model="inputFilePath"
+                        size="small"
+                        placeholder="请输入或粘贴完整目录路径，按 Enter 回车进入"
+                        @enter="confirmInputPath"
+                        @keydown.esc.native="cancelEditPath">
                     </bk-input>
-                    <bk-icon type="arrows-down-shape" @click="handleSearchFile" style="cursor: pointer;"></bk-icon>
+                    <bk-button size="small" theme="primary" @click="confirmInputPath" style="margin-left: 8px;">进入</bk-button>
+                    <bk-button size="small" @click="cancelEditPath" style="margin-left: 6px;">取消</bk-button>
                 </div>
-                <div style="margin-top: 10px;display: flex;align-items: center;">
-                    <bk-input type="text" v-model="searchWord" placeholder="根据文件名称搜索" @enter="handleSearch"></bk-input>
-                    <div style="margin-left: 10px;margin-right: 5px;">
-                        <bk-dropdown-menu :align="'right'">
-                            <template slot="dropdown-trigger">
-                                <span class="dropdown-trigger-btn bk-icon icon-sort"
-                                    style="cursor: pointer;font-size: 20px;"></span>
-                            </template>
-                            <ul class="bk-dropdown-list" slot="dropdown-content">
-                                <li><a href="javascript:;" @click="changeSorted('name')"
-                                    :class="{ 'isSelected': sortedField.includes('name') }">名称</a></li>
-                                <li><a href="javascript:;" @click="changeSorted('update_time')"
-                                    :class="{ 'isSelected': sortedField.includes('update_time') }">修改时间</a></li>
-                                <li><a href="javascript:;" @click="changeSorted('size')"
-                                    :class="{ 'isSelected': sortedField.includes('size') }">大小</a></li>
-                            </ul>
-                        </bk-dropdown-menu>
-                    </div>
-                </div>
-                <transition name="bk-slide-fade-down">
-                    <div style="margin-top: 10px;" v-show="fadeShowDir">
-                        <bk-tree
-                            ref="tree1"
-                            :data="treeListOne"
-                            :multiple="true"
-                            :node-key="'id'"
-                            :has-border="true"
-                            :tpl="tpl"
-                            :draggable="true"
-                            :drag-sort="true"
-                            @on-click="nodeClickOne"
-                            @on-check="nodeCheckTwo"
-                            @on-expanded="nodeExpandedOne">
-                        </bk-tree>
-                    </div>
-                </transition>
+            </div>
+
+            <!-- 右侧动作：浏览目录弹窗、历史记录下拉 -->
+            <div class="top-nav-right">
+                <bk-button size="small" theme="primary" :outline="true" @click="openDirBrowser" class="browse-dir-btn" style="margin-right: 8px;">
+                    <bk-icon type="folder" style="margin-right: 4px;"></bk-icon> 浏览目录
+                </bk-button>
+
+                <bk-dropdown-menu align="right" class="history-dropdown">
+                    <template slot="dropdown-trigger">
+                        <bk-button size="small" :outline="true" title="查看最近访问的目录">
+                            <bk-icon type="time" style="margin-right: 4px;"></bk-icon> 历史 ({{ recentDirs.length }})
+                            <bk-icon type="angle-down" style="margin-left: 4px;"></bk-icon>
+                        </bk-button>
+                    </template>
+                    <ul class="bk-dropdown-list history-dropdown-list" slot="dropdown-content">
+                        <li v-if="recentDirs.length === 0" class="history-empty" style="padding: 8px 12px; color: #979ba5; font-size: 12px;">暂无历史记录</li>
+                        <li v-for="(dir, dIdx) in recentDirs" :key="dIdx" @click="selectRecentDir(dir)" :title="dir" class="history-item">
+                            <a href="javascript:;"><bk-icon type="folder" style="margin-right: 6px; color: #63656e;"></bk-icon>{{ dir }}</a>
+                        </li>
+                        <li v-if="recentDirs.length > 0" class="clear-history-item" @click.stop="clearRecentDirs">
+                            <a href="javascript:;" style="color: #ea3636; font-size: 12px; text-align: center; border-top: 1px solid #dcdee5;">清空历史</a>
+                        </li>
+                    </ul>
+                </bk-dropdown-menu>
             </div>
         </div>
-        <div class="edit-section" v-show="musicInfo.title || checkedIds.length > 0">
-            <transition name="bk-slide-fade-left">
-                <div style="margin-left: 40px;width: 500px;margin-top: 20px;"
-                    v-show="musicInfo.title && checkedIds.length === 0">
-                    <div style="width: 100%;display: flex;align-items: center;">
-                        <bk-button :theme="'success'" :loading="isLoading" @click="handleClick" class="mr10"
-                            style="width: 80%;">
-                            保存信息
+
+        <!-- 主工作区：左侧全宽展示表格，右侧为抽屉式单曲编辑面板 -->
+        <div class="main-workspace">
+            <div class="resource-section" :class="{ 'with-drawer-open': Boolean(musicInfo.title) }">
+            <!-- 顶部控制工具栏 -->
+            <div class="resource-header">
+                <div v-if="activeRightTab === 'fileList'" class="file-list-toolbar">
+                    <div style="display: flex; align-items: center;">
+                        <span class="size-btn size-small" :class="{ 'active-size': tableSize === 'small' }" @click="setTableSize('small')" title="紧凑字号">Tt</span>
+                        <span class="size-btn size-medium" :class="{ 'active-size': tableSize === 'medium' }" @click="setTableSize('medium')" title="标准字号">Tt</span>
+                        <span class="size-btn size-large" :class="{ 'active-size': tableSize === 'large' }" @click="setTableSize('large')" title="大字号">Tt</span>
+                        <span class="toolbar-label">每页:</span>
+                        <select v-model="tablePageSize" @change="handlePageSizeChange" class="page-size-select">
+                            <option :value="32">32</option>
+                            <option :value="64">64</option>
+                            <option :value="128">128</option>
+                            <option :value="256">256</option>
+                            <option :value="512">512</option>
+                            <option :value="1000">1000</option>
+                        </select>
+                        <bk-button size="small" theme="primary" :outline="true" @click="openMultiBatchModal('title')" style="margin-left: 12px; height: 26px; line-height: 24px; padding: 0 10px;">
+                            <bk-icon type="edit" style="margin-right: 4px;"></bk-icon>批量修改
                         </bk-button>
-                        <div style="margin-left: 6px;cursor: pointer;" @click="exampleSetting3.primary.visible = true" title="配置">
-                            <bk-icon type="cog-shape"></bk-icon>
+
+                        <bk-dropdown-menu align="left" style="margin-left: 8px;">
+                            <template slot="dropdown-trigger">
+                                <bk-button size="small" :outline="true" style="height: 26px; line-height: 24px; padding: 0 8px;">更多操作 <bk-icon type="angle-down"></bk-icon></bk-button>
+                            </template>
+                            <ul class="bk-dropdown-list" slot="dropdown-content">
+                                <li><a href="javascript:;" @click="exampleSetting1.primary.visible = true"><bk-icon type="magic" style="margin-right: 6px;"></bk-icon>自动匹配修改</a></li>
+                                <li><a href="javascript:;" @click="exampleSetting2.primary.visible = true"><bk-icon type="folder-open" style="margin-right: 6px;"></bk-icon>整理分类文件夹</a></li>
+                            </ul>
+                        </bk-dropdown-menu>
+
+                        <span class="selected-count-badge" v-if="tableSelectedRows.length > 0" style="margin-left: 8px; font-size: 12px; color: #3a84ff; background: #e1ecff; padding: 2px 8px; border-radius: 10px; display: inline-flex; align-items: center;">
+                            已选 {{ tableSelectedRows.length }} 首
+                            <i class="bk-icon icon-close" @click="clearTableSelection" style="cursor: pointer; margin-left: 6px; font-size: 10px;" title="清空已选"></i>
+                        </span>
+                    </div>
+                    <div style="display: flex; align-items: center;">
+                        <bk-input
+                            type="text"
+                            size="small"
+                            v-model="searchWord"
+                            placeholder="根据文件名搜索"
+                            @enter="handleSearchSubmit"
+                            :clearable="true"
+                            @clear="handleSearchSubmit"
+                            style="width: 200px; margin-right: 8px;">
+                        </bk-input>
+                        <bk-dropdown-menu :align="'right'" style="margin-right: 12px;">
+                            <template slot="dropdown-trigger">
+                                <bk-button size="small" :outline="true" title="文件排序">
+                                    <span class="bk-icon icon-sort" style="margin-right: 4px;"></span>
+                                    {{ currentSortLabel }}
+                                </bk-button>
+                            </template>
+                            <ul class="bk-dropdown-list" slot="dropdown-content">
+                                <li><a href="javascript:;" @click="changeSorted('name')" :class="{ 'isSelected': sortedField.includes('name') }">按文件名</a></li>
+                                <li><a href="javascript:;" @click="changeSorted('update_time')" :class="{ 'isSelected': sortedField.includes('update_time') }">按修改时间</a></li>
+                                <li><a href="javascript:;" @click="changeSorted('size')" :class="{ 'isSelected': sortedField.includes('size') }">按文件大小</a></li>
+                            </ul>
+                        </bk-dropdown-menu>
+                        <span class="total-count-text">数量: {{ folderMusicTotal }}</span>
+                    </div>
+                </div>
+                <div v-else class="subview-toolbar">
+                    <bk-button :text="true" theme="primary" @click="activeRightTab = 'fileList'" style="font-size: 13px;">
+                        <bk-icon type="arrows-left-shape" style="margin-right: 5px;"></bk-icon> 返回文件列表
+                    </bk-button>
+                    <span style="font-size: 13px; font-weight: 500; color: #495060;">
+                        {{ activeRightTab === 'searchList' ? '在线刮削候选' : '歌词翻译' }}
+                    </span>
+                    <span style="width: 80px;"></span>
+                </div>
+            </div>
+
+            <!-- 1. 文件信息列表视图 (默认视图) -->
+            <div v-show="activeRightTab === 'fileList'" class="table-container" v-bkloading="{ isLoading: isTableLoading }">
+                <div class="table-body-wrap">
+                    <bk-table
+                        ref="musicTable"
+                        :data="folderMusicList"
+                        :size="tableSize"
+                        height="100%"
+                        :row-class-name="tableRowClassName"
+                        @row-click="handleTableRowClick"
+                        @selection-change="handleTableSelectionChange"
+                        :outer-border="false"
+                        :header-border="false"
+                        style="width: 100%; border: none;">
+                        <bk-table-column type="selection" width="45" align="center"></bk-table-column>
+                        <bk-table-column label="状态" width="105" align="center">
+                            <template slot-scope="props">
+                                <span v-if="getFileStatus(props.row) === 'wait'" class="batch-status-badge status-wait">
+                                    <i class="bk-icon icon-clock"></i> 待修改
+                                </span>
+                                <span v-else-if="getFileStatus(props.row) === 'running'" class="batch-status-badge status-running">
+                                    <i class="bk-icon icon-circle-2-1 spin-icon"></i> 修改中
+                                </span>
+                                <span v-else-if="getFileStatus(props.row) === 'success'" class="batch-status-badge status-success">
+                                    <i class="bk-icon icon-check-1"></i> 已修改
+                                </span>
+                                <span v-else-if="getFileStatus(props.row) === 'failed'" class="batch-status-badge status-failed" v-bk-tooltips="getFileStatusExtra(props.row) || '修改失败'">
+                                    <i class="bk-icon icon-close"></i> 失败
+                                </span>
+                                <span v-else class="batch-status-badge status-none">
+                                    无修改
+                                </span>
+                            </template>
+                        </bk-table-column>
+                        <bk-table-column width="75" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'album_img', '封面')">
+                            <template slot-scope="props">
+                                <div class="table-cover-box" :class="'cover-' + tableSize">
+                                    <img v-if="props.row.has_cover" :src="props.row.cover_url" :key="props.row.cover_url" class="table-cover-img" loading="lazy" @error="props.row.has_cover = false" />
+                                    <div v-else class="table-cover-placeholder"></div>
+                                </div>
+                            </template>
+                        </bk-table-column>
+                        <bk-table-column prop="filename" min-width="160" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'filename', '文件名')"></bk-table-column>
+                        <bk-table-column prop="title" min-width="150" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'title', '标题')"></bk-table-column>
+                        <bk-table-column prop="artist" min-width="130" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'artist', '艺术家')"></bk-table-column>
+                        <bk-table-column prop="album" min-width="150" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'album', '专辑')"></bk-table-column>
+                        <bk-table-column prop="albumartist" min-width="120" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'albumartist', '专辑艺术家')"></bk-table-column>
+                        <bk-table-column label="歌词" width="70" align="center">
+                            <template slot-scope="props">
+                                <span class="pill-badge" :class="{ 'pill-badge-has': props.row.has_lyrics }">
+                                    {{ props.row.has_lyrics ? '有' : '无' }}
+                                </span>
+                            </template>
+                        </bk-table-column>
+                        <bk-table-column label="LRC" width="70" align="center">
+                            <template slot-scope="props">
+                                <span class="pill-badge" :class="{ 'pill-badge-has': props.row.has_lrc }">
+                                    {{ props.row.has_lrc ? '有' : '无' }}
+                                </span>
+                            </template>
+                        </bk-table-column>
+                        <bk-table-column prop="year" width="80" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'year', '年份')">
+                            <template slot-scope="props">
+                                <span>{{ props.row.year && props.row.year !== '0' ? props.row.year : '' }}</span>
+                            </template>
+                        </bk-table-column>
+                        <bk-table-column prop="genre" width="85" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'genre', '风格')">
+                            <template slot-scope="props">
+                                <span>{{ props.row.genre && props.row.genre !== '未知' ? props.row.genre : '' }}</span>
+                            </template>
+                        </bk-table-column>
+                    </bk-table>
+                </div>
+                <div v-if="folderMusicTotal > 0" class="table-pagination-wrap">
+                    <bk-pagination
+                        :current.sync="tablePage"
+                        :count="folderMusicTotal"
+                        :limit="tablePageSize"
+                        :limit-list="pageSizeList"
+                        @change="handleTablePageChange"
+                        @limit-change="handlePageLimitChange"
+                        size="small"
+                        align="right"
+                        :show-total-count="true">
+                    </bk-pagination>
+                </div>
+            </div>
+
+            <!-- 2. 在线刮削搜索候选视图 -->
+            <transition name="bk-slide-fade-left">
+                <div
+                    style="display: flex;flex-direction: column;flex: 1;margin: 15px 20px;overflow-y: auto;"
+                    v-show="activeRightTab === 'searchList'">
+                    <div v-if="SongList.length === 0">
+                        <span style="margin-left: 30%;margin-top: 30%;">暂无匹配候选歌曲</span>
+                    </div>
+                    <div v-else>
+                        <div class="parent">
+                            <div class="title2">应用</div>
+                            <div class="title2">封面</div>
+                            <div class="title2">标题</div>
+                            <div class="title2">艺术家</div>
+                            <div class="title2">专辑</div>
+                            <div class="title2">歌词</div>
+                            <div class="title2">年份</div>
                         </div>
-                        <div style="margin-left: 10px;cursor: pointer;" @click="closeEditSection" title="收起编辑面板">
-                            <bk-icon type="close-circle-shape" style="color: #979ba5; font-size: 16px;"></bk-icon>
+                        <div v-for="(item,index) in SongList" :key="index" style="margin-bottom: 10px;" class="parent">
+                            <bk-icon type="arrows-left-shape" @click="copyAll(item)"
+                                style="margin-right: 5px;cursor: pointer;"></bk-icon>
+                            <div v-if="resource === 'smart_tag'">
+                                <bk-badge class="mr40" :theme="'warning'" :val="item.score" radius="20%">
+                                    <bk-image fit="contain" :src="item.album_img"
+                                        style="width: 64px;cursor: pointer;"
+                                        @click="handleCopy('album_img',item.album_img)">
+                                    </bk-image>
+                                </bk-badge>
+                            </div>
+                            <div v-else>
+                                <bk-image fit="contain" :src="item.album_img"
+                                    style="width: 64px;cursor: pointer;"
+                                    @click="handleCopy('album_img',item.album_img)">
+                                </bk-image>
+                            </div>
+                            <div @click="handleCopy('title',item.name)" class="music-item">
+                                {{ item.name }}
+                            </div>
+                            <div @click="handleCopy('artist',item.artist)" class="music-item">
+                                {{ item.artist }}
+                            </div>
+                            <div @click="handleCopy('album',item.album)" class="music-item">
+                                {{ item.album }}
+                            </div>
+                            <div @click="handleCopy('lyric',item)" class="music-item">加载歌词</div>
+                            <div @click="handleCopy('year',item.year)" class="music-item">
+                                {{ item.year }}
+                            </div>
+                            <bk-divider></bk-divider>
+                            <bk-divider></bk-divider>
+                            <bk-divider></bk-divider>
+                            <bk-divider></bk-divider>
+                            <bk-divider></bk-divider>
+                            <bk-divider></bk-divider>
+                            <bk-divider></bk-divider>
                         </div>
                     </div>
-                    <div style="display: flex;margin-bottom: 10px;align-items: center;margin-top: 10px;">
+                </div>
+            </transition>
+
+            <!-- 3. 歌词翻译视图 -->
+            <transition name="bk-slide-fade-left">
+                <div v-show="activeRightTab === 'translation'" style="flex: 1;margin: 15px 20px;overflow-y: auto;">
+                    <div style="display: flex;height: 100%;">
+                        <bk-icon type="arrows-left-shape" @click="handleCopy('lyric_tran',translationText)"
+                            style="margin-right: 5px;margin-left: 15px;margin-top: 50%;cursor: pointer;"></bk-icon>
+                        <div style="width: 100%;height: 100%;">
+                            <bk-input :clearable="true" v-model="translationText" type="textarea" :rows="50"
+                                style="height: 100%;">
+                            </bk-input>
+                        </div>
+                    </div>
+                </div>
+            </transition>
+        </div>
+
+        <!-- 右侧单曲编辑抽屉 -->
+        <transition name="drawer-slide">
+            <div class="song-edit-drawer" v-show="Boolean(musicInfo.title)">
+                <div class="drawer-header">
+                    <div style="display: flex; align-items: center; overflow: hidden; max-width: 270px;">
+                        <span style="font-weight: 600; font-size: 14px; color: #313238; white-space: nowrap;">编辑歌曲标签</span>
+                        <span style="font-size: 12px; color: #979ba5; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="fileName">({{ fileName }})</span>
+                    </div>
+                    <div style="display: flex; align-items: center;">
+                        <bk-button size="small" theme="primary" :loading="isLoading" @click="handleClick" style="margin-right: 8px;">保存信息</bk-button>
+                        <div style="cursor: pointer; margin-right: 12px;" @click="exampleSetting3.primary.visible = true" title="配置">
+                            <bk-icon type="cog-shape" style="font-size: 16px; color: #63656e;"></bk-icon>
+                        </div>
+                        <div style="cursor: pointer;" @click="closeEditSection" title="收起编辑面板">
+                            <bk-icon type="close-circle-shape" style="font-size: 16px; color: #979ba5;"></bk-icon>
+                        </div>
+                    </div>
+                </div>
+                <div class="drawer-body">
+<div style="display: flex;margin-bottom: 10px;align-items: center;margin-top: 10px;">
                         <div class="label1 can-copy" v-bk-tooltips="'变量名:${title}'" v-bk-copy="'${title}'">标题：</div>
                         <div style="width: 70%;">
                             <bk-input :clearable="true" v-model="musicInfo.title"></bk-input>
@@ -253,371 +518,44 @@
                         </div>
                     </div>
                 </div>
-            </transition>
-            <transition name="bk-slide-fade-left">
-                <div style="margin-left: 40px;width: 500px;margin-top: 20px;" v-show="checkedIds.length > 0">
-                    <div style="width: 100%;display: flex;">
-                        <bk-button :theme="'primary'" :loading="isLoading" @click="handleBatch" class="mr10"
-                            style="width: 100%;">
-                            手动修改
-                        </bk-button>
-                    </div>
-                    <div style="width: 100%;display: flex;margin-top: 10px;">
-                        <bk-button :theme="'success'" :loading="isLoading"
-                            @click="exampleSetting1.primary.visible = true" class="mr10"
-                            style="width: 50%;">
-                            自动修改
-                        </bk-button>
-                        <bk-button :theme="'success'" :loading="isLoading"
-                            @click="exampleSetting2.primary.visible = true" class="mr10"
-                            style="width: 50%;">
-                            整理文件夹
-                        </bk-button>
-                    </div>
-                    <bk-divider>
-                        <div style="color: gray;font-size: 12px;">手动修改参数</div>
-                    </bk-divider>
-                    <div style="display: flex;margin-bottom: 10px;align-items: center;margin-top: 10px;">
-                        <div class="label1 can-copy" v-bk-tooltips="'变量名:${title}'" v-bk-copy="'${title}'">标题：</div>
-                        <div style="width: 70%;">
-                            <bk-input :clearable="true" v-model="musicInfoManual.title"
-                                :placeholder="'支持变量批量修改'"></bk-input>
-                        </div>
-                    </div>
-                    <div v-for="(item, index) in showFields" :key="'l2' + index">
-                        <div class="edit-item" v-if="item === 'filename'">
-                            <div class="label1 can-copy" v-bk-tooltips="'变量名:${filename}'" v-bk-copy="'${filename}'">
-                                文件名：
-                            </div>
-                            <div style="width: 70%;">
-                                <bk-input :clearable="true" v-model="musicInfoManual.filename"
-                                    :placeholder="'例如：${title}-${album}'"></bk-input>
-                            </div>
-                        </div>
-                        <div class="edit-item" v-else-if="item === 'artist'">
-                            <div class="label1 can-copy" v-bk-tooltips="'变量名:${artist}'" v-bk-copy="'${artist}'">艺术家：
-                            </div>
-                            <div style="width: 70%;">
-                                <bk-input :clearable="true" v-model="musicInfoManual.artist"
-                                    :placeholder="'具体哪些变量,鼠标悬浮在标题上查看'"></bk-input>
-                            </div>
-                        </div>
-                        <div class="edit-item" v-else-if="item === 'album'">
-                            <div class="label1 can-copy" v-bk-tooltips="'变量名:${album}'" v-bk-copy="'${album}'">专辑：</div>
-                            <div style="width: 70%;">
-                                <bk-input :clearable="true" v-model="musicInfoManual.album"></bk-input>
-                            </div>
-                        </div>
-                        <div class="edit-item" v-else-if="item === 'albumartist'">
-                            <div class="label1 can-copy" v-bk-tooltips="'变量名:${albumartist}'"
-                                v-bk-copy="'${albumartist}'">专辑艺术家：
-                            </div>
-                            <div style="width: 70%;">
-                                <bk-input :clearable="true" v-model="musicInfoManual.albumartist"></bk-input>
-                            </div>
-                        </div>
-                        <div class="edit-item" v-else-if="item === 'genre'">
-                            <div class="label1">风格：</div>
-                            <div style="width: 70%;">
-                                <bk-select
-                                    :disabled="false"
-                                    v-model="musicInfoManual.genre"
-                                    style="width: 250px;background: #fff;"
-                                    ext-cls="select-custom"
-                                    ext-popover-cls="select-popover-custom"
-                                    :placeholder="'请选择歌曲风格'"
-                                    searchable>
-                                    <bk-option v-for="option in genreList"
-                                        :key="option.id"
-                                        :id="option.id"
-                                        :name="option.name">
-                                    </bk-option>
-                                </bk-select>
-                            </div>
-                        </div>
-                        <div class="edit-item" v-else-if="item === 'language'">
-                            <div class="label1">语言：</div>
-                            <div style="width: 70%;">
-                                <bk-select
-                                    :disabled="false"
-                                    v-model="musicInfoManual.language"
-                                    style="width: 250px;background: #fff;"
-                                    ext-cls="select-custom"
-                                    ext-popover-cls="select-popover-custom"
-                                    :placeholder="'请选择歌曲语言'"
-                                    searchable>
-                                    <bk-option v-for="option in languageList"
-                                        :key="option.id"
-                                        :id="option.id"
-                                        :name="option.name">
-                                    </bk-option>
-                                </bk-select>
-                            </div>
-                        </div>
-                        <div class="edit-item" v-else-if="item === 'year'">
-                            <div class="label1">年份：</div>
-                            <div style="width: 70%;">
-                                <bk-input :clearable="true" v-model="musicInfoManual.year"></bk-input>
-                            </div>
-                        </div>
-                        <div style="display: flex;margin-bottom: 10px;flex-direction: column;"
-                            v-else-if="item === 'lyrics'">
-                            <div style="display: flex;">
-                                <div class="label1">歌词：</div>
-                                <div style="width: 70%;">
-                                    <bk-input :clearable="true" v-model="musicInfoManual.lyrics" type="textarea"
-                                        :rows="15"
-                                    ></bk-input>
-                                </div>
-                            </div>
-                            <div style="display: flex;margin-top: 10px;">
-                                <div class="label1">保存歌词：</div>
-                                <bk-switcher v-model="musicInfoManual.is_save_lyrics_file"></bk-switcher>
-                            </div>
-                        </div>
-                        <div class="edit-item" v-else-if="item === 'comment'">
-                            <div class="label1">描述：</div>
-                            <div style="width: 70%;">
-                                <bk-input :clearable="true" v-model="musicInfoManual.comment"
-                                    type="textarea"></bk-input>
-                            </div>
-                        </div>
-                        <div class="edit-item" v-else-if="item === 'album_img'">
-                            <div class="label1">专辑封面：</div>
-                            <div style="display: flex;flex-direction: column;">
-                                <div style="width: 70%;display: flex;flex-direction: column;" v-if="reloadImg">
-                                    <div>
-                                        <bk-upload
-                                            :files="files1"
-                                            :theme="'picture'"
-                                            :multiple="false"
-                                            :with-credentials="true"
-                                            :header="uploadHeader"
-                                            :handle-res-code="handleResBatch"
-                                            :size="{ maxFileSize: 5, maxImgSize: 5 }"
-                                            :url="uploadUrl"
-                                            name="upload_file"
-                                        ></bk-upload>
-                                    </div>
-                                </div>
-                                <div style="display: flex;margin-top: 10px;">
-                                    <div class="label1">保存图片：</div>
-                                    <bk-switcher v-model="musicInfoManual.is_save_album_cover"></bk-switcher>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="edit-item" v-else-if="item === 'discnumber'">
-                            <div class="label1" v-bk-tooltips="'变量名:${discnumber}'">光盘编号：</div>
-                            <div style="width: 70%;">
-                                <bk-input :clearable="true" v-model="musicInfoManual.discnumber"></bk-input>
-                            </div>
-                        </div>
-                        <div class="edit-item" v-else-if="item === 'tracknumber'">
-                            <div class="label1" v-bk-tooltips="'变量名:${tracknumber}'">音轨号：</div>
-                            <div style="width: 70%;">
-                                <bk-input :clearable="true" v-model="musicInfoManual.tracknumber"></bk-input>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </transition>
-        </div>
-        <div class="resource-section">
-            <!-- 顶部控制工具栏 -->
-            <div class="resource-header">
-                <div v-if="activeRightTab === 'fileList'" class="file-list-toolbar">
-                    <div style="display: flex; align-items: center;">
-                        <span class="size-btn size-small" :class="{ 'active-size': tableSize === 'small' }" @click="setTableSize('small')" title="紧凑字号">Tt</span>
-                        <span class="size-btn size-medium" :class="{ 'active-size': tableSize === 'medium' }" @click="setTableSize('medium')" title="标准字号">Tt</span>
-                        <span class="size-btn size-large" :class="{ 'active-size': tableSize === 'large' }" @click="setTableSize('large')" title="大字号">Tt</span>
-                        <span class="toolbar-label">每页:</span>
-                        <select v-model="tablePageSize" @change="handlePageSizeChange" class="page-size-select">
-                            <option :value="32">32</option>
-                            <option :value="64">64</option>
-                            <option :value="128">128</option>
-                            <option :value="256">256</option>
-                            <option :value="512">512</option>
-                            <option :value="1000">1000</option>
-                        </select>
-                        <bk-button size="small" theme="primary" :outline="true" @click="openMultiBatchModal('title')" style="margin-left: 12px; height: 26px; line-height: 24px; padding: 0 10px;">
-                            <bk-icon type="edit" style="margin-right: 4px;"></bk-icon>批量修改
-                        </bk-button>
-                        <span class="selected-count-badge" v-if="tableSelectedRows.length > 0" style="margin-left: 8px; font-size: 12px; color: #3a84ff; background: #e1ecff; padding: 2px 8px; border-radius: 10px; display: inline-flex; align-items: center;">
-                            已选 {{ tableSelectedRows.length }} 首
-                            <i class="bk-icon icon-close" @click="clearTableSelection" style="cursor: pointer; margin-left: 6px; font-size: 10px;" title="清空已选"></i>
-                        </span>
-                    </div>
-                    <div style="display: flex; align-items: center;">
-                        <span class="total-count-text">数量: {{ folderMusicTotal }}</span>
-                    </div>
-                </div>
-                <div v-else class="subview-toolbar">
-                    <bk-button :text="true" theme="primary" @click="activeRightTab = 'fileList'" style="font-size: 13px;">
-                        <bk-icon type="arrows-left-shape" style="margin-right: 5px;"></bk-icon> 返回文件列表
-                    </bk-button>
-                    <span style="font-size: 13px; font-weight: 500; color: #495060;">
-                        {{ activeRightTab === 'searchList' ? '在线刮削候选' : '歌词翻译' }}
-                    </span>
-                    <span style="width: 80px;"></span>
-                </div>
             </div>
+        </transition>
+    </div>
 
-            <!-- 1. 文件信息列表视图 (默认视图) -->
-            <div v-show="activeRightTab === 'fileList'" class="table-container" v-bkloading="{ isLoading: isTableLoading }">
-                <bk-table
-                    ref="musicTable"
-                    :data="folderMusicList"
-                    :size="tableSize"
-                    :row-class-name="tableRowClassName"
-                    @row-click="handleTableRowClick"
-                    @selection-change="handleTableSelectionChange"
-                    :outer-border="false"
-                    :header-border="false"
-                    style="width: 100%; border: none;">
-                    <bk-table-column type="selection" width="45" align="center"></bk-table-column>
-                    <bk-table-column label="状态" width="105" align="center">
-                        <template slot-scope="props">
-                            <span v-if="getFileStatus(props.row) === 'wait'" class="batch-status-badge status-wait">
-                                <i class="bk-icon icon-clock"></i> 待修改
-                            </span>
-                            <span v-else-if="getFileStatus(props.row) === 'running'" class="batch-status-badge status-running">
-                                <i class="bk-icon icon-circle-2-1 spin-icon"></i> 修改中
-                            </span>
-                            <span v-else-if="getFileStatus(props.row) === 'success'" class="batch-status-badge status-success">
-                                <i class="bk-icon icon-check-1"></i> 已修改
-                            </span>
-                            <span v-else-if="getFileStatus(props.row) === 'failed'" class="batch-status-badge status-failed" v-bk-tooltips="getFileStatusExtra(props.row) || '修改失败'">
-                                <i class="bk-icon icon-close"></i> 失败
-                            </span>
-                            <span v-else class="batch-status-badge status-none">
-                                无修改
-                            </span>
-                        </template>
-                    </bk-table-column>
-                    <bk-table-column width="75" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'album_img', '封面')">
-                        <template slot-scope="props">
-                            <div class="table-cover-box" :class="'cover-' + tableSize">
-                                <img v-if="props.row.has_cover" :src="props.row.cover_url" :key="props.row.cover_url" class="table-cover-img" loading="lazy" @error="props.row.has_cover = false" />
-                                <div v-else class="table-cover-placeholder"></div>
-                            </div>
-                        </template>
-                    </bk-table-column>
-                    <bk-table-column prop="filename" min-width="160" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'filename', '文件名')"></bk-table-column>
-                    <bk-table-column prop="title" min-width="150" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'title', '标题')"></bk-table-column>
-                    <bk-table-column prop="artist" min-width="130" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'artist', '艺术家')"></bk-table-column>
-                    <bk-table-column prop="album" min-width="150" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'album', '专辑')"></bk-table-column>
-                    <bk-table-column prop="albumartist" min-width="120" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'albumartist', '专辑艺术家')"></bk-table-column>
-                    <bk-table-column label="歌词" width="70" align="center">
-                        <template slot-scope="props">
-                            <span class="pill-badge" :class="{ 'pill-badge-has': props.row.has_lyrics }">
-                                {{ props.row.has_lyrics ? '有' : '无' }}
-                            </span>
-                        </template>
-                    </bk-table-column>
-                    <bk-table-column label="LRC" width="70" align="center">
-                        <template slot-scope="props">
-                            <span class="pill-badge" :class="{ 'pill-badge-has': props.row.has_lrc }">
-                                {{ props.row.has_lrc ? '有' : '无' }}
-                            </span>
-                        </template>
-                    </bk-table-column>
-                    <bk-table-column prop="year" width="80" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'year', '年份')">
-                        <template slot-scope="props">
-                            <span>{{ props.row.year && props.row.year !== '0' ? props.row.year : '' }}</span>
-                        </template>
-                    </bk-table-column>
-                    <bk-table-column prop="genre" width="85" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'genre', '风格')">
-                        <template slot-scope="props">
-                            <span>{{ props.row.genre && props.row.genre !== '未知' ? props.row.genre : '' }}</span>
-                        </template>
-                    </bk-table-column>
-                </bk-table>
-                <div v-if="folderMusicTotal > tablePageSize" class="table-pagination-wrap">
-                    <bk-pagination
-                        :current.sync="tablePage"
-                        :count="folderMusicTotal"
-                        :limit="tablePageSize"
-                        @change="handleTablePageChange"
-                        size="small">
-                    </bk-pagination>
-                </div>
+    <!-- 目录树浏览弹窗 -->
+    <bk-dialog
+        v-model="dirBrowserVisible"
+        title="选择文件目录"
+        :width="650"
+        :mask-close="true"
+        @confirm="confirmDirBrowser">
+        <div v-bkloading="{ isLoading: dirBrowserLoading }">
+            <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                <span style="font-size: 12px; color: #63656e; margin-right: 8px; white-space: nowrap;">快捷位置:</span>
+                <bk-button size="small" :outline="true" @click="loadDirTreeRoot('/app/media')" style="margin-right: 6px;">/app/media</bk-button>
+                <bk-button size="small" :outline="true" @click="loadDirTreeRoot('/app')" style="margin-right: 6px;">/app</bk-button>
+                <bk-button size="small" :outline="true" @click="loadDirTreeRoot('/')" style="margin-right: 6px;">根目录 /</bk-button>
             </div>
-
-            <!-- 2. 在线刮削搜索候选视图 -->
-            <transition name="bk-slide-fade-left">
-                <div
-                    style="display: flex;flex-direction: column;flex: 1;margin: 15px 20px;overflow-y: auto;"
-                    v-show="activeRightTab === 'searchList'">
-                    <div v-if="SongList.length === 0">
-                        <span style="margin-left: 30%;margin-top: 30%;">暂无匹配候选歌曲</span>
-                    </div>
-                    <div v-else>
-                        <div class="parent">
-                            <div class="title2">应用</div>
-                            <div class="title2">封面</div>
-                            <div class="title2">标题</div>
-                            <div class="title2">艺术家</div>
-                            <div class="title2">专辑</div>
-                            <div class="title2">歌词</div>
-                            <div class="title2">年份</div>
-                        </div>
-                        <div v-for="(item,index) in SongList" :key="index" style="margin-bottom: 10px;" class="parent">
-                            <bk-icon type="arrows-left-shape" @click="copyAll(item)"
-                                style="margin-right: 5px;cursor: pointer;"></bk-icon>
-                            <div v-if="resource === 'smart_tag'">
-                                <bk-badge class="mr40" :theme="'warning'" :val="item.score" radius="20%">
-                                    <bk-image fit="contain" :src="item.album_img"
-                                        style="width: 64px;cursor: pointer;"
-                                        @click="handleCopy('album_img',item.album_img)">
-                                    </bk-image>
-                                </bk-badge>
-                            </div>
-                            <div v-else>
-                                <bk-image fit="contain" :src="item.album_img"
-                                    style="width: 64px;cursor: pointer;"
-                                    @click="handleCopy('album_img',item.album_img)">
-                                </bk-image>
-                            </div>
-                            <div @click="handleCopy('title',item.name)" class="music-item">
-                                {{ item.name }}
-                            </div>
-                            <div @click="handleCopy('artist',item.artist)" class="music-item">
-                                {{ item.artist }}
-                            </div>
-                            <div @click="handleCopy('album',item.album)" class="music-item">
-                                {{ item.album }}
-                            </div>
-                            <div @click="handleCopy('lyric',item)" class="music-item">加载歌词</div>
-                            <div @click="handleCopy('year',item.year)" class="music-item">
-                                {{ item.year }}
-                            </div>
-                            <bk-divider></bk-divider>
-                            <bk-divider></bk-divider>
-                            <bk-divider></bk-divider>
-                            <bk-divider></bk-divider>
-                            <bk-divider></bk-divider>
-                            <bk-divider></bk-divider>
-                            <bk-divider></bk-divider>
-                        </div>
-                    </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: #f0f5ff; border: 1px solid #c0d8ff; border-radius: 4px; margin-bottom: 10px; font-size: 12px;">
+                <div style="display: flex; align-items: center; overflow: hidden; flex: 1; margin-right: 10px;">
+                    <span style="color: #63656e; margin-right: 6px; white-space: nowrap;">当前选中:</span>
+                    <span style="color: #3a84ff; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ selectedBrowserPath || '请在下方选择文件夹' }}</span>
                 </div>
-            </transition>
-
-            <!-- 3. 歌词翻译视图 -->
-            <transition name="bk-slide-fade-left">
-                <div v-show="activeRightTab === 'translation'" style="flex: 1;margin: 15px 20px;overflow-y: auto;">
-                    <div style="display: flex;height: 100%;">
-                        <bk-icon type="arrows-left-shape" @click="handleCopy('lyric_tran',translationText)"
-                            style="margin-right: 5px;margin-left: 15px;margin-top: 50%;cursor: pointer;"></bk-icon>
-                        <div style="width: 100%;height: 100%;">
-                            <bk-input :clearable="true" v-model="translationText" type="textarea" :rows="50"
-                                style="height: 100%;">
-                            </bk-input>
-                        </div>
-                    </div>
-                </div>
-            </transition>
+                <bk-button size="small" theme="primary" :disabled="!selectedBrowserPath" @click="confirmDirBrowser">进入此目录</bk-button>
+            </div>
+            <div class="dir-tree-box" style="height: 380px; overflow-y: auto; border: 1px solid #dcdee5; border-radius: 4px; padding: 8px;">
+                <bk-tree
+                    ref="dirTreeRef"
+                    :data="dirTreeData"
+                    :node-key="'path'"
+                    :has-border="false"
+                    @on-click="handleDirTreeNodeClick"
+                    @async-load-nodes="handleDirTreeAsyncLoad"
+                    @on-expanded="handleDirTreeNodeExpanded">
+                </bk-tree>
+            </div>
         </div>
+    </bk-dialog>
 
         <bk-dialog v-model="exampleSetting1.primary.visible"
             theme="primary"
@@ -1006,6 +944,15 @@
                     {id: 'single', name: '单曲'}
                 ],
                 searchWord: '',
+                currentDirPath: localStorage.getItem('last_visited_dir') || '/app/media/',
+                isEditingPath: false,
+                inputFilePath: '',
+                recentDirs: [],
+                dirBrowserVisible: false,
+                dirBrowserLoading: false,
+                dirFilterWord: '',
+                selectedBrowserPath: '',
+                dirTreeData: [],
                 treeListOne: [],
                 fullPath: '',
                 fileName: '',
@@ -1109,6 +1056,7 @@
                 sortedField: localStorage.getItem('sortedField') ? JSON.parse(localStorage.getItem('sortedField')) : [],
                 tableSize: localStorage.getItem('tableSize') || 'medium',
                 tablePageSize: localStorage.getItem('tablePageSize') ? Number(localStorage.getItem('tablePageSize')) : 128,
+                pageSizeList: [32, 64, 128, 256, 512, 1000],
                 tablePage: 1,
                 folderMusicList: [],
                 folderMusicTotal: 0,
@@ -1245,26 +1193,76 @@
                 }
                 return this.folderMusicList.slice(0, 4)
             },
+            pathSegments() {
+                const raw = (this.currentDirPath || '').trim()
+                const parts = raw.split('/').filter(p => p.length > 0)
+                let accumulated = ''
+                return parts.map(part => {
+                    accumulated += '/' + part
+                    return {
+                        name: part,
+                        path: accumulated
+                    }
+                })
+            },
+            isAtRoot() {
+                return !this.currentDirPath || this.currentDirPath === '/' || this.currentDirPath === ''
+            },
+            currentSortLabel() {
+                if (this.sortedField.includes('name')) return '文件名'
+                if (this.sortedField.includes('update_time')) return '修改时间'
+                if (this.sortedField.includes('size')) return '文件大小'
+                return '排序'
+            },
             filePath: {
                 get() {
                     if (this.geFullPath) {
-                        console.log(this.geFullPath)
                         const fullPath = this.geFullPath
                         this.$store.commit('setFullPath', '')
-                        this.$nextTick(() => {
-                            this.handleSearchFile()
-                        })
+                        this.currentDirPath = fullPath
                         return fullPath
-                    } else {
-                        return '/app/media/'
                     }
+                    return this.currentDirPath || '/app/media/'
                 },
                 set(value) {
+                    this.currentDirPath = value
                     this.$store.commit('setFullPath', value)
                 }
             }
         },
+        watch: {
+            activeRightTab(val) {
+                if (val === 'fileList') {
+                    this.$nextTick(() => {
+                        if (this.$refs.musicTable) {
+                            this.$refs.musicTable.doLayout()
+                        }
+                    })
+                }
+            },
+            'musicInfo.title'(val) {
+                this.$nextTick(() => {
+                    setTimeout(() => {
+                        if (this.$refs.musicTable) {
+                            this.$refs.musicTable.doLayout()
+                        }
+                    }, 260)
+                })
+            }
+        },
         created() {
+            try {
+                const savedRecent = localStorage.getItem('music_recent_dirs')
+                if (savedRecent) {
+                    this.recentDirs = JSON.parse(savedRecent)
+                }
+            } catch (e) {}
+
+            const lastDir = localStorage.getItem('last_visited_dir')
+            if (lastDir) {
+                this.currentDirPath = lastDir
+            }
+            this.addRecentDir(this.currentDirPath)
             this.handleSearchFile()
         },
         beforeDestroy() {
@@ -1274,6 +1272,135 @@
             }
         },
         methods: {
+            navigateToPath(path) {
+                if (!path) return
+                const clean = path.replace(/\/+$/, '') || '/'
+                this.currentDirPath = clean
+                this.filePath = clean
+                this.isEditingPath = false
+                this.tablePage = 1
+                this.fileName = ''
+                this.musicInfo = Object.assign({}, this.baseMusicInfo)
+                localStorage.setItem('last_visited_dir', clean)
+                this.addRecentDir(clean)
+                this.fetchFolderMusicList()
+            },
+            navigateToSegment(idx) {
+                const seg = this.pathSegments[idx]
+                if (seg) {
+                    this.navigateToPath(seg.path)
+                }
+            },
+            backDir() {
+                if (this.pathSegments.length > 1) {
+                    this.navigateToPath(this.pathSegments[this.pathSegments.length - 2].path)
+                } else {
+                    this.navigateToPath('/')
+                }
+            },
+            refreshDir() {
+                this.tablePage = 1
+                this.fetchFolderMusicList()
+                this.$cwMessage('目录已刷新', 'success')
+            },
+            startEditPath() {
+                this.inputFilePath = this.currentDirPath
+                this.isEditingPath = true
+                this.$nextTick(() => {
+                    if (this.$refs.pathInputRef && this.$refs.pathInputRef.focus) {
+                        this.$refs.pathInputRef.focus()
+                    }
+                })
+            },
+            cancelEditPath() {
+                this.isEditingPath = false
+            },
+            confirmInputPath() {
+                if (!this.inputFilePath) {
+                    this.cancelEditPath()
+                    return
+                }
+                this.navigateToPath(this.inputFilePath)
+            },
+            addRecentDir(path) {
+                if (!path || path === '/') return
+                const clean = path.replace(/\/+$/, '')
+                let list = this.recentDirs.filter(d => d !== clean)
+                list.unshift(clean)
+                if (list.length > 10) {
+                    list = list.slice(0, 10)
+                }
+                this.recentDirs = list
+                try {
+                    localStorage.setItem('music_recent_dirs', JSON.stringify(list))
+                } catch (e) {}
+            },
+            selectRecentDir(path) {
+                this.navigateToPath(path)
+            },
+            clearRecentDirs() {
+                this.recentDirs = []
+                try {
+                    localStorage.removeItem('music_recent_dirs')
+                } catch (e) {}
+            },
+            openDirBrowser() {
+                this.dirBrowserVisible = true
+                this.selectedBrowserPath = this.currentDirPath
+                this.dirFilterWord = ''
+                this.loadDirTreeRoot('/app/media')
+            },
+            loadDirTreeRoot(rootPath) {
+                const target = rootPath || '/app/media'
+                this.dirBrowserLoading = true
+                this.$api.Task.fileList({ file_path: target, only_dir: true }).then((res) => {
+                    this.dirBrowserLoading = false
+                    if (res.result && res.data) {
+                        this.dirTreeData = res.data
+                    }
+                }).catch(() => {
+                    this.dirBrowserLoading = false
+                })
+            },
+            handleDirTreeAsyncLoad(node) {
+                if (!node || !node.path) return
+                this.$set(node, 'loading', true)
+                this.$api.Task.fileList({ file_path: node.path, only_dir: true }).then((res) => {
+                    this.$set(node, 'loading', false)
+                    if (res.result && res.data && res.data[0]) {
+                        const children = res.data[0].children || []
+                        this.$set(node, 'children', children)
+                        this.$set(node, 'async', false)
+                        this.$set(node, 'expanded', true)
+                    }
+                }).catch(() => {
+                    this.$set(node, 'loading', false)
+                })
+            },
+            handleDirTreeNodeClick(node) {
+                this.selectedBrowserPath = node.path
+                // 点击节点行同时触发展开/收起下钻
+                if (node.async && !node.children) {
+                    this.handleDirTreeAsyncLoad(node)
+                } else if (node.children && node.children.length > 0) {
+                    this.$set(node, 'expanded', !node.expanded)
+                }
+            },
+            handleDirTreeNodeExpanded(node, expanded) {
+                if (expanded && (!node.children || node.children.length === 0) && node.async) {
+                    this.handleDirTreeAsyncLoad(node)
+                }
+            },
+            confirmDirBrowser() {
+                if (this.selectedBrowserPath) {
+                    this.navigateToPath(this.selectedBrowserPath)
+                }
+                this.dirBrowserVisible = false
+            },
+            handleSearchSubmit() {
+                this.tablePage = 1
+                this.fetchFolderMusicList()
+            },
             tpl(node, ctx) {
                 // 如果在某些情况下 h 不能自动注入而报错，需将 h 参数写上；一般来说 h 默认是第一参数，但是现在改为第一参数会导致已经使用的用户都需要修改，所以先放在最后。
                 // 如果 h 能自动注入则可以忽略 h 参数，无需写上，否则 h 参数会重复。
@@ -1295,28 +1422,6 @@
                     </span>
                     </span>
                 }
-            },
-            backDir() {
-                this.filePath = this.backPath(this.filePath)
-                this.tablePage = 1
-                this.fetchFolderMusicList()
-            },
-            backPath(path) {
-                // 使用正则表达式匹配最后一个斜杠及其后面的内容
-                const regex = /\/([^\/]+)\/?$/
-                const match = regex.exec(path)
-
-                // 如果匹配到了最后一个斜杠及其后面的内容
-                if (match) {
-                    // 截取掉最后一个斜杠及其后面的内容
-                    const parentPath = path.slice(0, match.index)
-
-                    // 返回回退后的路径
-                    return parentPath || '/'
-                }
-
-                // 如果没有匹配到最后一个斜杠及其后面的内容，则返回原始路径
-                return path
             },
             nodeClickOne(node) {
                 if (node.icon === 'icon-folder') {
@@ -1363,7 +1468,14 @@
                 this.tableSize = size
                 localStorage.setItem('tableSize', size)
             },
+            handlePageLimitChange(limit) {
+                this.tablePageSize = Number(limit) || 128
+                localStorage.setItem('tablePageSize', this.tablePageSize)
+                this.tablePage = 1
+                this.fetchFolderMusicList()
+            },
             handlePageSizeChange() {
+                this.tablePageSize = Number(this.tablePageSize) || 128
                 localStorage.setItem('tablePageSize', this.tablePageSize)
                 this.tablePage = 1
                 this.fetchFolderMusicList()
@@ -1393,6 +1505,11 @@
                     if (res.result && res.data) {
                         this.folderMusicList = res.data.items || []
                         this.folderMusicTotal = res.data.total || 0
+                        this.$nextTick(() => {
+                            if (this.$refs.musicTable) {
+                                this.$refs.musicTable.doLayout()
+                            }
+                        })
                     } else {
                         this.folderMusicList = []
                         this.folderMusicTotal = 0
@@ -1519,17 +1636,6 @@
             },
             // 文件目录
             handleSearchFile() {
-                this.fadeShowDir = false
-                this.checkedData = []
-                this.checkedIds = []
-                this.$api.Task.fileList({'file_path': this.filePath, sorted_fields: this.sortedField}).then((res) => {
-                    if (res.result) {
-                        this.treeListOne = res.data
-                        this.fadeShowDir = true
-                    } else {
-                        this.$cwMessage(res.message, 'error')
-                    }
-                })
                 this.tablePage = 1
                 this.fetchFolderMusicList()
             },
@@ -2104,72 +2210,209 @@
     cursor: pointer;
 }
 
-@media (max-width: 500px) {
-    /* 在屏幕宽度小于400像素时应用的CSS规则 */
-    .file-section {
-        background: #fff;
-        height: calc(100vh - 75px);
-        overflow: scroll;
-        width: 100vh;
-        border: 1px solid #173769;
-        margin: 10px 0 10px 10px;
-        border-radius: 20px;
-    }
-    .edit-section {
-        background: #fff;
-        height: calc(100vh - 75px);
-        overflow: scroll;
-        width: 100vh;
-        border: 1px solid #173769;
-        margin: 10px 10px 10px 10px;
-        border-radius: 20px;
-    }
-
-    .resource-section {
-        background: #fff;
-        height: calc(100vh - 75px);
-        width: 100vh;
-        flex: 1;
-        overflow: scroll;
-        border: 1px solid #173769;
-        margin: 10px 10px 10px 0;
-        border-radius: 20px;
-    }
+/* 全局布局与顶部导航 */
+.home-main-layout {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #f5f7fa;
 }
 
-@media (min-width: 400px) {
-    /* 在屏幕宽度大于400像素时应用的CSS规则 */
-    .file-section {
-        background: #fff;
-        height: calc(100vh - 75px);
-        overflow: scroll;
-        min-width: 400px;
-        border: 1px solid #173769;
-        margin: 10px 0 10px 10px;
-        border-radius: 20px;
-    }
+.top-nav-bar {
+    height: 48px;
+    min-height: 48px;
+    flex-shrink: 0;
+    background: #ffffff;
+    border-bottom: 1px solid #dcdee5;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    z-index: 10;
+}
 
-    .edit-section {
-        background: #fff;
-        height: calc(100vh - 75px);
-        overflow: scroll;
-        border: 1px solid #173769;
-        margin: 10px 10px 10px 10px;
-        border-radius: 20px;
-    }
+.top-nav-left {
+    display: flex;
+    align-items: center;
+    margin-right: 14px;
+    border-right: 1px solid #dcdee5;
+    padding-right: 10px;
+}
 
-    .resource-section {
-        background: #fff;
-        height: calc(100vh - 75px);
-        min-width: 400px;
-        flex: 1;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        border: 1px solid #173769;
-        margin: 10px 10px 10px 0;
-        border-radius: 20px;
-    }
+.nav-act-btn {
+    margin-right: 6px;
+    font-size: 13px;
+    color: #63656e;
+}
+.nav-act-btn:hover {
+    color: #3a84ff;
+}
+
+.top-nav-center {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    margin-right: 14px;
+}
+
+.path-breadcrumb-wrap {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    background: #f0f1f5;
+    border-radius: 4px;
+    padding: 3px 8px;
+    border: 1px solid #dcdee5;
+}
+
+.path-breadcrumb {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    font-size: 13px;
+    color: #495060;
+    flex: 1;
+}
+
+.path-breadcrumb::-webkit-scrollbar {
+    height: 3px;
+}
+.path-breadcrumb::-webkit-scrollbar-thumb {
+    background: #c4c6cc;
+    border-radius: 2px;
+}
+
+.path-segment {
+    cursor: pointer;
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: #495060;
+    transition: all 0.2s;
+    user-select: none;
+}
+.path-segment:hover {
+    background: #e1ecff;
+    color: #3a84ff;
+}
+.root-segment {
+    font-weight: 500;
+    color: #3a84ff;
+    display: inline-flex;
+    align-items: center;
+}
+.path-separator {
+    color: #979ba5;
+    margin: 0 3px;
+    user-select: none;
+}
+
+.edit-path-btn {
+    cursor: pointer;
+    margin-left: 8px;
+    color: #979ba5;
+    padding: 2px 4px;
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+}
+.edit-path-btn:hover {
+    color: #3a84ff;
+    background: #e1ecff;
+}
+
+.path-input-wrap {
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.top-nav-right {
+    display: flex;
+    align-items: center;
+}
+
+.history-dropdown-list {
+    max-height: 280px;
+    overflow-y: auto;
+}
+.history-item a {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 320px;
+    font-size: 12px;
+}
+.clear-history-item a {
+    color: #ea3636 !important;
+    text-align: center;
+    border-top: 1px solid #f0f1f5;
+}
+
+.main-workspace {
+    flex: 1;
+    height: 0;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+.resource-section {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    background: #ffffff;
+    border: 1px solid #dcdee5;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: all 0.25s ease;
+}
+
+.song-edit-drawer {
+    width: 480px;
+    min-width: 480px;
+    height: 100%;
+    background: #ffffff;
+    border: 1px solid #dcdee5;
+    border-radius: 6px;
+    margin-left: 10px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.06);
+}
+
+.drawer-header {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    border-bottom: 1px solid #dcdee5;
+    background: #fafbfd;
+}
+
+.drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+}
+
+.drawer-slide-enter-active, .drawer-slide-leave-active {
+    transition: all 0.25s ease;
+}
+.drawer-slide-enter, .drawer-slide-leave-to {
+    transform: translateX(30px);
+    opacity: 0;
 }
 
 .resource-header {
@@ -2252,10 +2495,20 @@
 
 .table-container {
     flex: 1;
-    overflow-y: auto;
-    overflow-x: auto;
+    height: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    position: relative;
+}
+
+.table-body-wrap {
+    flex: 1;
+    height: 0;
+    min-height: 0;
+    position: relative;
+    overflow: hidden;
 }
 
 .table-cover-box {
@@ -2323,11 +2576,31 @@
 }
 
 .table-pagination-wrap {
-    padding: 10px 16px;
-    border-top: 1px solid #f0f1f5;
+    flex-shrink: 0;
+    padding: 8px 16px;
+    border-top: 1px solid #dfe0e5;
     display: flex;
     justify-content: flex-end;
+    align-items: center;
     background: #ffffff;
+}
+
+.bk-table-body-wrapper::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.bk-table-body-wrapper::-webkit-scrollbar-thumb {
+    background-color: #c4c6cc;
+    border-radius: 3px;
+}
+
+.bk-table-body-wrapper::-webkit-scrollbar-thumb:hover {
+    background-color: #979ba5;
+}
+
+.bk-table-body-wrapper::-webkit-scrollbar-track {
+    background: transparent;
 }
 
 .bk-form-checkbox {
@@ -2415,12 +2688,21 @@ button.bk-button-text {
 }
 
 ::-webkit-scrollbar {
-    width: 0;
-    background-color: transparent;
+    width: 6px;
+    height: 6px;
 }
 
 ::-webkit-scrollbar-thumb {
-    background-color: #f4f5f0;
+    background-color: #c4c6cc;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: #979ba5;
+}
+
+::-webkit-scrollbar-track {
+    background-color: transparent;
 }
 
 .isSelected {

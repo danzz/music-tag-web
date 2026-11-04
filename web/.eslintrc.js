@@ -1318,7 +1318,8 @@ module.exports = {
         {
             files: ['*.vue'],
             rules: {
-                indent: 'off'
+                indent: 'off',
+                'vue/html-indent': 'off'
             }
         }
     ]

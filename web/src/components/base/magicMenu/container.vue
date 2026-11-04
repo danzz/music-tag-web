@@ -16,6 +16,7 @@
 
 <style scoped>
     #container {
-        height: calc(100vh - 52px);
+        height: 100%;
+        overflow: hidden;
     }
 </style>
