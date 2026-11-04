@@ -60,14 +60,8 @@ exports.cssLoaders = function (options) {
         css: generateLoaders(),
         postcss: generateLoaders(),
         less: generateLoaders('less'),
-        sass: generateLoaders('sass', {indentedSyntax: true}),
-        scss: generateLoaders('sass').concat(
-            {
-                loader: 'sass-resources-loader',
-                options: {
-                    resources: path.resolve(__dirname, '../src/assets/base/css/color.scss') //这里是单独建的存放变量的scss，我的是 var.scss
-                }
-            }),
+        sass: generateLoaders(),
+        scss: generateLoaders(),
         stylus: generateLoaders('stylus'),
         styl: generateLoaders('stylus')
     }

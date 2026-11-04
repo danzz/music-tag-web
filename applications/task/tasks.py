@@ -243,63 +243,79 @@ def clear_music():
     Attachment.objects.all().delete()
 
 
+from applications.utils.db_safety import db_write_safe
+
+
+@db_write_safe
+def update_task_state_safe(task_id, full_path, state, song_name, artist_name, extra=""):
+    TaskRecord.objects.filter(id=task_id).update(state=state, extra=extra)
+    parent_path = os.path.dirname(full_path)
+    filename = os.path.basename(full_path)
+    Task.objects.update_or_create(full_path=full_path, defaults={
+        "state": state,
+        "parent_path": parent_path,
+        "filename": filename,
+        "song_name": song_name,
+        "artist_name": artist_name,
+        "extra": extra,
+    })
+
+
+def process_single_auto_tag_task(task, source_list, select_mode):
+    """
+    单首歌曲自动刮削任务单元 (多线程并发执行)
+    """
+    is_match = False
+    error_msg = ""
+    for resource in source_list:
+        try:
+            is_match = match_song(resource, task.full_path, select_mode)
+        except Exception as e:
+            error_msg = f"{resource} 异常: {str(e)}"
+            is_match = False
+        if is_match:
+            break
+
+    if is_match:
+        update_task_state_safe(task.id, task.full_path, "success", task.song_name, task.artist_name, extra="")
+        return True
+    else:
+        fail_reason = error_msg if error_msg else "未匹配到合适的元数据"
+        update_task_state_safe(task.id, task.full_path, "failed", task.song_name, task.artist_name, extra=fail_reason)
+        return False
+
+
 def batch_auto_tag_task(batch, source_list, select_mode):
     """
-    自动刮削任务
+    自动刮削任务（多线程并发版）
     source_list: ["migu", "qmusic", "netease"]
     """
     folder_list = TaskRecord.objects.filter(batch=batch, icon="icon-folder").all()
     for folder in folder_list:
-        data = os.scandir(folder.full_path)
-        bulk_set = []
-        for entry in data:
-            each = entry.name
-            file_type = each.split(".")[-1]
-            file_name = ".".join(each.split(".")[:-1])
-            if file_type not in ALLOW_TYPE:
-                continue
-            bulk_set.append(TaskRecord(**{
-                "batch": batch,
-                "song_name": file_name,
-                "full_path": f"{folder.full_path}/{each}",
-                "icon": "icon-music",
+        try:
+            data = os.scandir(folder.full_path)
+            bulk_set = []
+            for entry in data:
+                each = entry.name
+                file_type = each.split(".")[-1]
+                file_name = ".".join(each.split(".")[:-1])
+                if file_type not in ALLOW_TYPE:
+                    continue
+                bulk_set.append(TaskRecord(**{
+                    "batch": batch,
+                    "song_name": file_name,
+                    "full_path": f"{folder.full_path}/{each}",
+                    "icon": "icon-music",
+                }))
+            if bulk_set:
+                TaskRecord.objects.bulk_create(bulk_set)
+        except Exception as e:
+            print(f"Error scanning folder {folder.full_path}: {e}")
 
-            }))
-        TaskRecord.objects.bulk_create(bulk_set)
-    task_list = TaskRecord.objects.filter(batch=batch).exclude(icon="icon-folder").all()
-    for task in task_list:
-        is_match = False
-        for resource in source_list:
-            print("开始匹配", resource)
-            try:
-                is_match = match_song(resource, task.full_path, select_mode)
-            except Exception as e:
-                print(e)
-                is_match = False
-                break
-            if is_match:
-                task.state = "success"
-                task.save()
-                parent_path = os.path.dirname(task.full_path)
-                Task.objects.update_or_create(full_path=task.full_path, defaults={
-                    "state": task.state,
-                    "parent_path": parent_path,
-                    "filename": os.path.basename(task.full_path),
-                    "song_name": task.song_name,
-                    "artist_name": task.artist_name,
-                })
-                break
-        if not is_match:
-            task.state = "failed"
-            task.save()
-            parent_path = os.path.dirname(task.full_path)
-            Task.objects.update_or_create(full_path=task.full_path, defaults={
-                "state": task.state,
-                "parent_path": parent_path,
-                "filename": os.path.basename(task.full_path),
-                "song_name": task.song_name,
-                "artist_name": task.artist_name,
-            })
+    task_list = list(TaskRecord.objects.filter(batch=batch).exclude(icon="icon-folder").all())
+    from applications.task.services.async_executor import executor
+    executor.submit_batch(batch, task_list, process_single_auto_tag_task, source_list=source_list, select_mode=select_mode, task_type="auto_tag")
+    return len(task_list)
 
 
 def tidy_folder_task(music_path_list, tidy_config):

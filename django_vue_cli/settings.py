@@ -84,12 +84,28 @@ else:
     MYSQL_HOST = "127.0.0.1"
 
 # Database
+DB_DIR = BASE_DIR
+if os.path.isdir('/app/data') and os.access('/app/data', os.W_OK):
+    DB_DIR = '/app/data'
+    root_db = os.path.join(BASE_DIR, 'db.sqlite3')
+    data_db = os.path.join(DB_DIR, 'db.sqlite3')
+    if os.path.exists(root_db) and not os.path.exists(data_db) and os.path.getsize(root_db) > 0:
+        import shutil
+        try:
+            shutil.copy2(root_db, data_db)
+        except Exception:
+            pass
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
+        'NAME': os.path.join(DB_DIR, 'db.sqlite3'),
+        'OPTIONS': {
+            'timeout': 20,
+        }
     }
 }
+WORKER_NUM = int(os.getenv("WORKER_NUM", 8))
 # DATABASES = {
 #     "default": {
 #         "ENGINE": "django.db.backends.mysql",

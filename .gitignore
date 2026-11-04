@@ -20,3 +20,5 @@ local_settings.py
 db.sqlite3
 /media/
 /build/
+test_environment/
+*.tar.gz

@@ -201,12 +201,17 @@ class MusicIDS:
         }
 
     def var_dict(self):
+        filename_no_ext = os.path.splitext(self.file_name)[0]
         return {
-            "title": self.title or self.file_name.split(".")[0],
+            "title": self.title or filename_no_ext,
             "artist": self.artist,
             "albumartist": self.album_artist,
             "discnumber": self.disc_number,
             "tracknumber": self.track_number,
             "album": self.album,
             "filename": self.file_name,
+            "filename_no_ext": filename_no_ext,
+            "basename": filename_no_ext,
+            "year": self.year,
+            "genre": self.genre,
         }

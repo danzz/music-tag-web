@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+  music-tag-web-test:
+    image: music-tag-web:local
+    container_name: music-tag-web-test
+    ports:
+      - "18002:8001"
+    environment:
+      dockerrun: "yes"
+      DJANGO_SECRET_KEY: "test-environment-secret-key-123456"
+      WORKER_NUM: 8
+    volumes:
+      - ./test_environment/media:/app/media:rw
+      - ./test_environment/config:/app/data:rw
+    command: /start
+    restart: unless-stopped
+

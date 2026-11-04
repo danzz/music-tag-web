@@ -9,6 +9,7 @@ class Task(models.Model):
     state = models.CharField(max_length=255, default="wait")
     parent_path = models.CharField(max_length=255, default="")
     filename = models.CharField(max_length=255, default="")
+    extra = models.TextField(default="")
     created_at = models.DateTimeField(null=True, auto_now_add=True)
 
 

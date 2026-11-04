@@ -25,7 +25,13 @@
                 </div>
                 <template slot="content">
                     <div class="monitor-navigation-message">
-                        <h5 class="message-title">消息中心</h5>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 15px 5px 15px;">
+                            <h5 class="message-title" style="margin: 0;">消息中心 (失败记录)</h5>
+                            <div>
+                                <bk-button :text="true" theme="primary" size="small" @click="fetchRecord" style="margin-right: 10px;">刷新</bk-button>
+                                <bk-button :text="true" theme="danger" size="small" v-if="msgList.length > 0" @click="handleRetryFailed">一键重试失败项</bk-button>
+                            </div>
+                        </div>
                         <ul class="message-list">
                             <li class="message-list-item" v-for="(item,index) in msgList" :key="index"
                                 @click="handleRedirect(item)">
@@ -140,6 +146,19 @@
                 this.$api.Task.getRecord({'state': 'failed', 'page_size': 20}).then((res) => {
                     if (res.result) {
                         this.msgList = res.data.items
+                    }
+                })
+            },
+            handleRetryFailed() {
+                this.$api.Task.retryFailed({}).then((res) => {
+                    if (res.result) {
+                        const count = res.data ? res.data.total : 0
+                        this.$cwMessage(`重试任务已在后台启动（共 ${count} 首）`, 'success')
+                        setTimeout(() => {
+                            this.fetchRecord()
+                        }, 1000)
+                    } else {
+                        this.$cwMessage('重试请求失败: ' + (res.message || ''), 'error')
                     }
                 })
             },

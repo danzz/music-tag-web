@@ -39,5 +39,14 @@ export default {
     },
     getRecord: function(params) {
         return GET(reUrl + '/api/record/', params)
+    },
+    batchProgress: function(params) {
+        return GET(reUrl + '/api/batch_progress/', params)
+    },
+    folderMusicList: function(params) {
+        return POST(reUrl + '/api/folder_music_list/', params)
+    },
+    retryFailed: function(params) {
+        return POST(reUrl + '/api/retry_failed/', params)
     }
 }

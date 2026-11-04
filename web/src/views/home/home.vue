@@ -49,17 +49,20 @@
                 </transition>
             </div>
         </div>
-        <div class="edit-section">
+        <div class="edit-section" v-show="musicInfo.title || checkedIds.length > 0">
             <transition name="bk-slide-fade-left">
                 <div style="margin-left: 40px;width: 500px;margin-top: 20px;"
                     v-show="musicInfo.title && checkedIds.length === 0">
                     <div style="width: 100%;display: flex;align-items: center;">
                         <bk-button :theme="'success'" :loading="isLoading" @click="handleClick" class="mr10"
-                            style="width: 87%;">
+                            style="width: 80%;">
                             保存信息
                         </bk-button>
-                        <div style="margin-left: 6px;cursor: pointer;" @click="exampleSetting3.primary.visible = true">
+                        <div style="margin-left: 6px;cursor: pointer;" @click="exampleSetting3.primary.visible = true" title="配置">
                             <bk-icon type="cog-shape"></bk-icon>
+                        </div>
+                        <div style="margin-left: 10px;cursor: pointer;" @click="closeEditSection" title="收起编辑面板">
+                            <bk-icon type="close-circle-shape" style="color: #979ba5; font-size: 16px;"></bk-icon>
                         </div>
                     </div>
                     <div style="display: flex;margin-bottom: 10px;align-items: center;margin-top: 10px;">
@@ -420,12 +423,133 @@
             </transition>
         </div>
         <div class="resource-section">
+            <!-- 顶部控制工具栏 -->
+            <div class="resource-header">
+                <div v-if="activeRightTab === 'fileList'" class="file-list-toolbar">
+                    <div style="display: flex; align-items: center;">
+                        <span class="size-btn size-small" :class="{ 'active-size': tableSize === 'small' }" @click="setTableSize('small')" title="紧凑字号">Tt</span>
+                        <span class="size-btn size-medium" :class="{ 'active-size': tableSize === 'medium' }" @click="setTableSize('medium')" title="标准字号">Tt</span>
+                        <span class="size-btn size-large" :class="{ 'active-size': tableSize === 'large' }" @click="setTableSize('large')" title="大字号">Tt</span>
+                        <span class="toolbar-label">每页:</span>
+                        <select v-model="tablePageSize" @change="handlePageSizeChange" class="page-size-select">
+                            <option :value="32">32</option>
+                            <option :value="64">64</option>
+                            <option :value="128">128</option>
+                            <option :value="256">256</option>
+                            <option :value="512">512</option>
+                            <option :value="1000">1000</option>
+                        </select>
+                        <bk-button size="small" theme="primary" :outline="true" @click="openMultiBatchModal('title')" style="margin-left: 12px; height: 26px; line-height: 24px; padding: 0 10px;">
+                            <bk-icon type="edit" style="margin-right: 4px;"></bk-icon>批量修改
+                        </bk-button>
+                        <span class="selected-count-badge" v-if="tableSelectedRows.length > 0" style="margin-left: 8px; font-size: 12px; color: #3a84ff; background: #e1ecff; padding: 2px 8px; border-radius: 10px; display: inline-flex; align-items: center;">
+                            已选 {{ tableSelectedRows.length }} 首
+                            <i class="bk-icon icon-close" @click="clearTableSelection" style="cursor: pointer; margin-left: 6px; font-size: 10px;" title="清空已选"></i>
+                        </span>
+                    </div>
+                    <div style="display: flex; align-items: center;">
+                        <span class="total-count-text">数量: {{ folderMusicTotal }}</span>
+                    </div>
+                </div>
+                <div v-else class="subview-toolbar">
+                    <bk-button :text="true" theme="primary" @click="activeRightTab = 'fileList'" style="font-size: 13px;">
+                        <bk-icon type="arrows-left-shape" style="margin-right: 5px;"></bk-icon> 返回文件列表
+                    </bk-button>
+                    <span style="font-size: 13px; font-weight: 500; color: #495060;">
+                        {{ activeRightTab === 'searchList' ? '在线刮削候选' : '歌词翻译' }}
+                    </span>
+                    <span style="width: 80px;"></span>
+                </div>
+            </div>
+
+            <!-- 1. 文件信息列表视图 (默认视图) -->
+            <div v-show="activeRightTab === 'fileList'" class="table-container" v-bkloading="{ isLoading: isTableLoading }">
+                <bk-table
+                    ref="musicTable"
+                    :data="folderMusicList"
+                    :size="tableSize"
+                    :row-class-name="tableRowClassName"
+                    @row-click="handleTableRowClick"
+                    @selection-change="handleTableSelectionChange"
+                    :outer-border="false"
+                    :header-border="false"
+                    style="width: 100%; border: none;">
+                    <bk-table-column type="selection" width="45" align="center"></bk-table-column>
+                    <bk-table-column label="状态" width="105" align="center">
+                        <template slot-scope="props">
+                            <span v-if="getFileStatus(props.row) === 'wait'" class="batch-status-badge status-wait">
+                                <i class="bk-icon icon-clock"></i> 待修改
+                            </span>
+                            <span v-else-if="getFileStatus(props.row) === 'running'" class="batch-status-badge status-running">
+                                <i class="bk-icon icon-circle-2-1 spin-icon"></i> 修改中
+                            </span>
+                            <span v-else-if="getFileStatus(props.row) === 'success'" class="batch-status-badge status-success">
+                                <i class="bk-icon icon-check-1"></i> 已修改
+                            </span>
+                            <span v-else-if="getFileStatus(props.row) === 'failed'" class="batch-status-badge status-failed" v-bk-tooltips="getFileStatusExtra(props.row) || '修改失败'">
+                                <i class="bk-icon icon-close"></i> 失败
+                            </span>
+                            <span v-else class="batch-status-badge status-none">
+                                无修改
+                            </span>
+                        </template>
+                    </bk-table-column>
+                    <bk-table-column width="75" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'album_img', '封面')">
+                        <template slot-scope="props">
+                            <div class="table-cover-box" :class="'cover-' + tableSize">
+                                <img v-if="props.row.has_cover" :src="props.row.cover_url" :key="props.row.cover_url" class="table-cover-img" loading="lazy" @error="props.row.has_cover = false" />
+                                <div v-else class="table-cover-placeholder"></div>
+                            </div>
+                        </template>
+                    </bk-table-column>
+                    <bk-table-column prop="filename" min-width="160" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'filename', '文件名')"></bk-table-column>
+                    <bk-table-column prop="title" min-width="150" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'title', '标题')"></bk-table-column>
+                    <bk-table-column prop="artist" min-width="130" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'artist', '艺术家')"></bk-table-column>
+                    <bk-table-column prop="album" min-width="150" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'album', '专辑')"></bk-table-column>
+                    <bk-table-column prop="albumartist" min-width="120" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'albumartist', '专辑艺术家')"></bk-table-column>
+                    <bk-table-column label="歌词" width="70" align="center">
+                        <template slot-scope="props">
+                            <span class="pill-badge" :class="{ 'pill-badge-has': props.row.has_lyrics }">
+                                {{ props.row.has_lyrics ? '有' : '无' }}
+                            </span>
+                        </template>
+                    </bk-table-column>
+                    <bk-table-column label="LRC" width="70" align="center">
+                        <template slot-scope="props">
+                            <span class="pill-badge" :class="{ 'pill-badge-has': props.row.has_lrc }">
+                                {{ props.row.has_lrc ? '有' : '无' }}
+                            </span>
+                        </template>
+                    </bk-table-column>
+                    <bk-table-column prop="year" width="80" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'year', '年份')">
+                        <template slot-scope="props">
+                            <span>{{ props.row.year && props.row.year !== '0' ? props.row.year : '' }}</span>
+                        </template>
+                    </bk-table-column>
+                    <bk-table-column prop="genre" width="85" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'genre', '风格')">
+                        <template slot-scope="props">
+                            <span>{{ props.row.genre && props.row.genre !== '未知' ? props.row.genre : '' }}</span>
+                        </template>
+                    </bk-table-column>
+                </bk-table>
+                <div v-if="folderMusicTotal > tablePageSize" class="table-pagination-wrap">
+                    <bk-pagination
+                        :current.sync="tablePage"
+                        :count="folderMusicTotal"
+                        :limit="tablePageSize"
+                        @change="handleTablePageChange"
+                        size="small">
+                    </bk-pagination>
+                </div>
+            </div>
+
+            <!-- 2. 在线刮削搜索候选视图 -->
             <transition name="bk-slide-fade-left">
                 <div
-                    style="display: flex;flex-direction: column;margin-top: 20px;flex: 1;margin-right: 20px;margin-left: 20px;"
-                    v-show="fadeShowDetail">
+                    style="display: flex;flex-direction: column;flex: 1;margin: 15px 20px;overflow-y: auto;"
+                    v-show="activeRightTab === 'searchList'">
                     <div v-if="SongList.length === 0">
-                        <span style="margin-left: 30%;margin-top: 30%;">暂无歌曲信息</span>
+                        <span style="margin-left: 30%;margin-top: 30%;">暂无匹配候选歌曲</span>
                     </div>
                     <div v-else>
                         <div class="parent">
@@ -455,23 +579,17 @@
                                 </bk-image>
                             </div>
                             <div @click="handleCopy('title',item.name)" class="music-item">
-                                {{
-                                    item.name
-                                }}
+                                {{ item.name }}
                             </div>
                             <div @click="handleCopy('artist',item.artist)" class="music-item">
                                 {{ item.artist }}
                             </div>
                             <div @click="handleCopy('album',item.album)" class="music-item">
-                                {{
-                                    item.album
-                                }}
+                                {{ item.album }}
                             </div>
                             <div @click="handleCopy('lyric',item)" class="music-item">加载歌词</div>
                             <div @click="handleCopy('year',item.year)" class="music-item">
-                                {{
-                                    item.year
-                                }}
+                                {{ item.year }}
                             </div>
                             <bk-divider></bk-divider>
                             <bk-divider></bk-divider>
@@ -484,8 +602,10 @@
                     </div>
                 </div>
             </transition>
+
+            <!-- 3. 歌词翻译视图 -->
             <transition name="bk-slide-fade-left">
-                <div v-show="showTranslation">
+                <div v-show="activeRightTab === 'translation'" style="flex: 1;margin: 15px 20px;overflow-y: auto;">
                     <div style="display: flex;height: 100%;">
                         <bk-icon type="arrows-left-shape" @click="handleCopy('lyric_tran',translationText)"
                             style="margin-right: 5px;margin-left: 15px;margin-top: 50%;cursor: pointer;"></bk-icon>
@@ -497,12 +617,8 @@
                     </div>
                 </div>
             </transition>
-            <div v-show="!fadeShowDetail && !showTranslation"
-                style="width: 90%;height: 90%; margin: 50px 20px 20px 50px;">
-                <bk-image fit="contain" :src="'/static/dist/img/music_null-cutout.png'"
-                    style="width: 100%;height: 98%;"></bk-image>
-            </div>
         </div>
+
         <bk-dialog v-model="exampleSetting1.primary.visible"
             theme="primary"
             :mask-close="false"
@@ -598,6 +714,253 @@
                     :name="option.name">
                 </bk-option>
             </bk-select>
+        </bk-dialog>
+
+        <!-- 4. 统一批量修改弹窗 (多属性/引用/剪裁/封面) -->
+        <bk-dialog v-model="batchModalVisible"
+            title="批量修改音乐属性 (支持多属性/引用/剪裁/封面)"
+            :width="980"
+            :mask-close="false"
+            :header-position="'left'">
+            <div class="batch-modal-body" v-if="batchModalVisible">
+                <!-- 1. 应用范围选择栏 -->
+                <div class="batch-scope-bar">
+                    <span class="scope-label">应用修改范围:</span>
+                    <bk-radio-group v-model="batchScope">
+                        <bk-radio-button value="selected" :disabled="tableSelectedRows.length === 0">
+                            已选中的歌曲 ({{ tableSelectedRows.length }} 首)
+                        </bk-radio-button>
+                        <bk-radio-button value="all">
+                            当前文件夹全部歌曲 (共 {{ folderMusicTotal }} 首)
+                        </bk-radio-button>
+                    </bk-radio-group>
+                    <span class="scope-tip" v-if="batchScope === 'selected'">仅对列表中勾选的歌曲生效</span>
+                    <span class="scope-tip" v-else>将对当前文件夹内所有支持的音频文件生效</span>
+                </div>
+
+                <!-- 2. 多字段勾选编排与激活标签 -->
+                <div class="batch-field-pills-wrap">
+                    <span class="pills-title">勾选要同时修改的属性 (点击切换配置)：</span>
+                    <div class="batch-field-pills">
+                        <div v-for="col in batchSupportedCols" :key="col.id"
+                            class="field-pill-item"
+                            :class="{ 'pill-active': activeBatchTab === col.id, 'pill-enabled': batchFieldsEnabled[col.id] }"
+                            @click="activeBatchTab = col.id">
+                            <bk-checkbox v-model="batchFieldsEnabled[col.id]" @click.native.stop></bk-checkbox>
+                            <span class="pill-name">{{ col.name }}</span>
+                            <span v-if="batchFieldsEnabled[col.id]" class="pill-badge-check">已启用</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. 当前激活字段配置卡片 -->
+                <div class="batch-config-panel">
+                    <!-- 3.1 封面配置面板 -->
+                    <div v-if="activeBatchTab === 'album_img'" class="config-section-cover">
+                        <div class="section-tip">
+                            为目标歌曲批量替换专辑封面或清空内嵌封面图片：
+                        </div>
+                        <div style="display: flex; gap: 24px; align-items: flex-start; margin-top: 12px;">
+                            <div style="width: 180px;" v-if="batchReloadImg">
+                                <bk-upload
+                                    :files="batchCoverFiles"
+                                    :theme="'picture'"
+                                    :multiple="false"
+                                    :with-credentials="true"
+                                    :header="uploadHeader"
+                                    :handle-res-code="handleBatchCoverUploadRes"
+                                    :size="{ maxFileSize: 10, maxImgSize: 10 }"
+                                    :url="uploadUrl"
+                                    name="upload_file">
+                                </bk-upload>
+                            </div>
+                            <div style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
+                                <div style="margin-bottom: 14px;">
+                                    <bk-checkbox v-model="batchConfig.album_img.is_save_album_cover">
+                                        同时保存为歌曲目录下的本地封面文件 (cover.jpg)
+                                    </bk-checkbox>
+                                </div>
+                                <div style="margin-bottom: 14px;">
+                                    <bk-checkbox v-model="batchConfig.album_img.clear_cover" @change="handleClearCoverChange">
+                                        清空现有封面 (移除所有目标歌曲内嵌封面)
+                                    </bk-checkbox>
+                                </div>
+                                <div v-if="batchConfig.album_img.img_base64 && !batchConfig.album_img.clear_cover" style="margin-top: 4px;">
+                                    <bk-button size="small" theme="danger" :text="true" @click="removeBatchCover">
+                                        <i class="bk-icon icon-close"></i> 移除已选封面图片
+                                    </bk-button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3.2 文本属性配置面板 -->
+                    <div v-else class="config-section-text">
+                        <!-- 快捷场景预设 -->
+                        <div class="preset-row">
+                            <span class="preset-label">快捷场景预设：</span>
+                            <div class="preset-btns">
+                                <template v-if="activeBatchTab === 'title'">
+                                    <bk-button size="small" @click="applyPreset('filename_no_ext')">使用文件名(去后缀)</bk-button>
+                                    <bk-button size="small" @click="applyPreset('artist_title')">歌手 - 歌名</bk-button>
+                                    <bk-button size="small" @click="applyPreset('remove_brackets')">去除括号及备注</bk-button>
+                                    <bk-button size="small" @click="applyPreset('underscore_to_space')">下划线转空格</bk-button>
+                                </template>
+                                <template v-else-if="activeBatchTab === 'filename'">
+                                    <bk-button size="small" @click="applyPreset('artist_title')">歌手 - 标题</bk-button>
+                                    <bk-button size="small" @click="applyPreset('track_title')">音轨号.标题</bk-button>
+                                    <bk-button size="small" @click="applyPreset('underscore_to_space')">下划线转空格</bk-button>
+                                </template>
+                                <template v-else-if="activeBatchTab === 'artist'">
+                                    <bk-button size="small" @click="applyPreset('from_albumartist')">引用专辑艺术家</bk-button>
+                                    <bk-button size="small" @click="applyPreset('underscore_to_space')">下划线转空格</bk-button>
+                                </template>
+                                <template v-else-if="activeBatchTab === 'album'">
+                                    <bk-button size="small" @click="applyPreset('from_title')">引用标题</bk-button>
+                                    <bk-button size="small" @click="applyPreset('from_filename')">引用文件名(去后缀)</bk-button>
+                                </template>
+                                <template v-else-if="activeBatchTab === 'albumartist'">
+                                    <bk-button size="small" @click="applyPreset('from_artist')">引用艺术家</bk-button>
+                                </template>
+                                <template v-else>
+                                    <span style="color: #979ba5; font-size: 12px;">可通过下方变量与剪裁自由组合</span>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- 模板输入框 -->
+                        <div class="template-input-row">
+                            <div class="input-head">
+                                <span class="input-title">拼接模板 (支持输入固定字符与变量占位符)：</span>
+                            </div>
+                            <bk-input
+                                v-model="batchConfig[activeBatchTab].template"
+                                :clearable="true"
+                                placeholder="例如：${filename_no_ext} 或 ${artist} - ${title}">
+                            </bk-input>
+                            <!-- 可点击插入变量标签 -->
+                            <div class="var-tags-row">
+                                <span class="var-tag-label">点击插入变量：</span>
+                                <div class="var-tags-list">
+                                    <span class="var-tag-btn" @click="insertVariableTag('${filename_no_ext}')" title="文件名但去掉后缀名">+ 文件名(无后缀)</span>
+                                    <span class="var-tag-btn" @click="insertVariableTag('${filename}')" title="完整文件名">+ 完整文件名</span>
+                                    <span class="var-tag-btn" @click="insertVariableTag('${title}')" title="现有标题">+ 标题</span>
+                                    <span class="var-tag-btn" @click="insertVariableTag('${artist}')" title="现有艺术家">+ 艺术家</span>
+                                    <span class="var-tag-btn" @click="insertVariableTag('${album}')" title="现有专辑">+ 专辑</span>
+                                    <span class="var-tag-btn" @click="insertVariableTag('${albumartist}')" title="现有专辑艺术家">+ 专辑艺术家</span>
+                                    <span class="var-tag-btn" @click="insertVariableTag('${tracknumber}')" title="音轨号">+ 音轨号</span>
+                                    <span class="var-tag-btn" @click="insertVariableTag('${year}')" title="年份">+ 年份</span>
+                                    <span class="var-tag-btn" @click="insertVariableTag('${genre}')" title="风格">+ 风格</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 剪裁与清洗转换规则 -->
+                        <div class="trim-config-box">
+                            <div class="trim-box-title">文本剪裁与清洗规则 (可选)：</div>
+                            <div class="trim-box-grid">
+                                <div class="trim-field-group">
+                                    <span class="trim-field-label">字符切片：</span>
+                                    <span class="sub-label">去除开头前</span>
+                                    <bk-input type="number" :min="0" v-model.number="batchConfig[activeBatchTab].trim_start" style="width: 65px;"></bk-input>
+                                    <span class="sub-label">字，去除末尾后</span>
+                                    <bk-input type="number" :min="0" v-model.number="batchConfig[activeBatchTab].trim_end" style="width: 65px;"></bk-input>
+                                    <span class="sub-label">字</span>
+                                </div>
+                                <div class="trim-field-group">
+                                    <span class="trim-field-label">文本替换：</span>
+                                    <bk-input v-model="batchConfig[activeBatchTab].replace_search" placeholder="查找内容" style="width: 120px;"></bk-input>
+                                    <span class="sub-label">换成</span>
+                                    <bk-input v-model="batchConfig[activeBatchTab].replace_with" placeholder="替换内容 (留空删除)" style="width: 140px;"></bk-input>
+                                </div>
+                                <div class="trim-field-group">
+                                    <span class="trim-field-label">正则替换：</span>
+                                    <bk-input v-model="batchConfig[activeBatchTab].regex_search" placeholder="正则表达式 (如：^\d+\.)" style="width: 160px;"></bk-input>
+                                    <span class="sub-label">换成</span>
+                                    <bk-input v-model="batchConfig[activeBatchTab].regex_replace" placeholder="替换文本 (如：$1)" style="width: 120px;"></bk-input>
+                                </div>
+                                <div class="trim-field-group">
+                                    <bk-checkbox v-model="batchConfig[activeBatchTab].strip">自动去除首尾空格 (Trim)</bk-checkbox>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. 实时多字段统一对比预览表格 -->
+                <div class="batch-preview-container">
+                    <div class="preview-header">
+                        <span class="preview-title">实时对比预览 (样本前 4 首歌曲)：</span>
+                        <span class="preview-tip" v-if="!hasAnyFieldEnabled" style="color: #ea3636;">
+                            当前尚未勾选任何需要修改的属性，请在上方勾选开启属性
+                        </span>
+                    </div>
+
+                    <div v-if="previewSampleSongs.length === 0" style="padding: 20px; text-align: center; color: #979ba5;">
+                        当前列表暂无样本歌曲数据
+                    </div>
+                    <div v-else class="preview-table-wrap">
+                        <table class="batch-preview-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 180px;">文件名</th>
+                                    <th v-for="col in enabledColsList" :key="'th-' + col.id">
+                                        {{ col.name }} (原值 → 修改后)
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(song, sIdx) in previewSampleSongs" :key="'sample-' + sIdx">
+                                    <td class="filename-cell" :title="song.filename">{{ song.filename }}</td>
+                                    <td v-for="col in enabledColsList" :key="'td-' + col.id">
+                                        <!-- 封面列预览 -->
+                                        <div v-if="col.id === 'album_img'" class="preview-cover-cell">
+                                            <div class="cover-thumb-box">
+                                                <img v-if="song.has_cover" :src="song.cover_url" class="thumb-img" />
+                                                <div v-else class="thumb-none">原无</div>
+                                            </div>
+                                            <span class="diff-arrow">→</span>
+                                            <div class="cover-thumb-box">
+                                                <span v-if="batchConfig.album_img.clear_cover" class="thumb-clear">清空</span>
+                                                <img v-else-if="batchConfig.album_img.preview_url" :src="batchConfig.album_img.preview_url" class="thumb-img thumb-new" />
+                                                <span v-else class="thumb-keep">保持</span>
+                                            </div>
+                                        </div>
+                                        <!-- 文本列预览 -->
+                                        <div v-else class="preview-text-cell">
+                                            <span class="diff-old" :title="song[col.id] || '(空)'">{{ song[col.id] || '(空)' }}</span>
+                                            <span class="diff-arrow">→</span>
+                                            <span class="diff-new" :title="evaluateFieldPreview(song, col.id) || '(空)'">
+                                                {{ evaluateFieldPreview(song, col.id) || '(空)' }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 自定义弹窗底部操作区 -->
+            <template slot="footer">
+                <div class="batch-dialog-footer">
+                    <div class="footer-left-info">
+                        <span>当前目标共计：<strong>{{ targetSongsCount }}</strong> 首歌曲</span>
+                    </div>
+                    <div class="footer-right-btns">
+                        <bk-button @click="batchModalVisible = false">取消</bk-button>
+                        <bk-button
+                            theme="primary"
+                            :loading="isBatchSubmitting"
+                            :disabled="!hasAnyFieldEnabled || targetSongsCount === 0"
+                            @click="handleConfirmMultiBatch"
+                            style="margin-left: 10px;">
+                            确认同时修改 ({{ targetSongsCount }} 首)
+                        </bk-button>
+                    </div>
+                </div>
+            </template>
         </bk-dialog>
     </div>
 </template>
@@ -743,11 +1106,145 @@
                         headerPosition: 'left'
                     }
                 },
-                sortedField: localStorage.getItem('sortedField') ? JSON.parse(localStorage.getItem('sortedField')) : []
+                sortedField: localStorage.getItem('sortedField') ? JSON.parse(localStorage.getItem('sortedField')) : [],
+                tableSize: localStorage.getItem('tableSize') || 'medium',
+                tablePageSize: localStorage.getItem('tablePageSize') ? Number(localStorage.getItem('tablePageSize')) : 128,
+                tablePage: 1,
+                folderMusicList: [],
+                folderMusicTotal: 0,
+                isTableLoading: false,
+                activeRightTab: 'fileList',
+                // 批量修改与进度跟踪状态
+                batchModalVisible: false,
+                isBatchSubmitting: false,
+                batchScope: 'all',
+                activeBatchTab: 'title',
+                tableSelectedRows: [],
+                batchStatusMap: {},
+                currentBatchId: '',
+                batchPollTimer: null,
+                batchReloadImg: true,
+                batchCoverFiles: [],
+                batchSupportedCols: [
+                    { id: 'album_img', name: '封面' },
+                    { id: 'filename', name: '文件名' },
+                    { id: 'title', name: '标题' },
+                    { id: 'artist', name: '艺术家' },
+                    { id: 'album', name: '专辑' },
+                    { id: 'albumartist', name: '专辑艺术家' },
+                    { id: 'year', name: '年份' },
+                    { id: 'genre', name: '风格' }
+                ],
+                batchFieldsEnabled: {
+                    album_img: false,
+                    filename: false,
+                    title: false,
+                    artist: false,
+                    album: false,
+                    albumartist: false,
+                    year: false,
+                    genre: false
+                },
+                batchConfig: {
+                    album_img: {
+                        img_base64: '',
+                        preview_url: '',
+                        is_save_album_cover: false,
+                        clear_cover: false
+                    },
+                    filename: {
+                        template: '${artist} - ${title}',
+                        trim_start: 0,
+                        trim_end: 0,
+                        replace_search: '',
+                        replace_with: '',
+                        regex_search: '',
+                        regex_replace: '',
+                        strip: true
+                    },
+                    title: {
+                        template: '${filename_no_ext}',
+                        trim_start: 0,
+                        trim_end: 0,
+                        replace_search: '',
+                        replace_with: '',
+                        regex_search: '',
+                        regex_replace: '',
+                        strip: true
+                    },
+                    artist: {
+                        template: '${artist}',
+                        trim_start: 0,
+                        trim_end: 0,
+                        replace_search: '',
+                        replace_with: '',
+                        regex_search: '',
+                        regex_replace: '',
+                        strip: true
+                    },
+                    album: {
+                        template: '${album}',
+                        trim_start: 0,
+                        trim_end: 0,
+                        replace_search: '',
+                        replace_with: '',
+                        regex_search: '',
+                        regex_replace: '',
+                        strip: true
+                    },
+                    albumartist: {
+                        template: '${albumartist}',
+                        trim_start: 0,
+                        trim_end: 0,
+                        replace_search: '',
+                        replace_with: '',
+                        regex_search: '',
+                        regex_replace: '',
+                        strip: true
+                    },
+                    year: {
+                        template: '${year}',
+                        trim_start: 0,
+                        trim_end: 0,
+                        replace_search: '',
+                        replace_with: '',
+                        regex_search: '',
+                        regex_replace: '',
+                        strip: true
+                    },
+                    genre: {
+                        template: '${genre}',
+                        trim_start: 0,
+                        trim_end: 0,
+                        replace_search: '',
+                        replace_with: '',
+                        regex_search: '',
+                        regex_replace: '',
+                        strip: true
+                    }
+                }
             }
         },
         computed: {
             ...mapGetters(['geFullPath']),
+            targetSongsCount() {
+                if (this.batchScope === 'all') {
+                    return this.folderMusicTotal
+                }
+                return this.tableSelectedRows.length
+            },
+            hasAnyFieldEnabled() {
+                return Object.values(this.batchFieldsEnabled).some(v => v)
+            },
+            enabledColsList() {
+                return this.batchSupportedCols.filter(col => this.batchFieldsEnabled[col.id])
+            },
+            previewSampleSongs() {
+                if (this.tableSelectedRows.length > 0) {
+                    return this.tableSelectedRows.slice(0, 4)
+                }
+                return this.folderMusicList.slice(0, 4)
+            },
             filePath: {
                 get() {
                     if (this.geFullPath) {
@@ -769,6 +1266,12 @@
         },
         created() {
             this.handleSearchFile()
+        },
+        beforeDestroy() {
+            if (this.batchPollTimer) {
+                clearInterval(this.batchPollTimer)
+                this.batchPollTimer = null
+            }
         },
         methods: {
             tpl(node, ctx) {
@@ -795,7 +1298,8 @@
             },
             backDir() {
                 this.filePath = this.backPath(this.filePath)
-                // this.handleSearchFile()
+                this.tablePage = 1
+                this.fetchFolderMusicList()
             },
             backPath(path) {
                 // 使用正则表达式匹配最后一个斜杠及其后面的内容
@@ -808,7 +1312,7 @@
                     const parentPath = path.slice(0, match.index)
 
                     // 返回回退后的路径
-                    return parentPath
+                    return parentPath || '/'
                 }
 
                 // 如果没有匹配到最后一个斜杠及其后面的内容，则返回原始路径
@@ -816,33 +1320,86 @@
             },
             nodeClickOne(node) {
                 if (node.icon === 'icon-folder') {
-                    this.filePath = this.filePath + '/' + node.name
-                    // this.handleSearchFile()
+                    const sep = this.filePath.endsWith('/') ? '' : '/'
+                    this.filePath = (this.filePath + sep + node.name).replace(/\/+/g, '/')
+                    this.fileName = ''
+                    this.activeRightTab = 'fileList'
+                    this.tablePage = 1
+                    this.fetchFolderMusicList()
                 } else {
                     if (node.children && node.children.length > 0) {
                         return
                     }
-                    this.musicInfo = this.baseMusicInfo
-                    this.fileName = node.name
-                    this.fullPath = this.filePath + '/' + node.name
-                    this.$api.Task.musicId3({'file_path': this.filePath, 'file_name': node.name}).then((res) => {
-                        console.log(res)
-                        if (res.result) {
-                            this.musicInfo = res.data
-                            this.musicInfo.is_save_lyrics_file = false
-                            this.musicInfo.is_save_album_cover = false
-                            this.files1 = [
-                                {
-                                    name: 'cover.png',
-                                    status: 'done',
-                                    url: this.musicInfo.artwork
-                                }
-                            ]
-                        } else {
-                            this.$cwMessage(res.message, 'error')
-                        }
-                    })
+                    this.loadSongDetail(node.name)
                 }
+            },
+            loadSongDetail(name) {
+                this.musicInfo = Object.assign({}, this.baseMusicInfo)
+                this.fileName = name
+                const cleanPath = this.filePath.replace(/\/+$/, '')
+                this.fullPath = cleanPath + '/' + name
+                this.$api.Task.musicId3({'file_path': cleanPath, 'file_name': name}).then((res) => {
+                    if (res.result) {
+                        this.musicInfo = res.data
+                        this.musicInfo.is_save_lyrics_file = false
+                        this.musicInfo.is_save_album_cover = false
+                        this.files1 = [
+                            {
+                                name: 'cover.png',
+                                status: 'done',
+                                url: this.musicInfo.artwork
+                            }
+                        ]
+                    } else {
+                        this.$cwMessage(res.message, 'error')
+                    }
+                })
+            },
+            closeEditSection() {
+                this.musicInfo = Object.assign({}, this.baseMusicInfo)
+                this.fileName = ''
+            },
+            setTableSize(size) {
+                this.tableSize = size
+                localStorage.setItem('tableSize', size)
+            },
+            handlePageSizeChange() {
+                localStorage.setItem('tablePageSize', this.tablePageSize)
+                this.tablePage = 1
+                this.fetchFolderMusicList()
+            },
+            handleTablePageChange(page) {
+                this.tablePage = page
+                this.fetchFolderMusicList()
+            },
+            tableRowClassName({ row }) {
+                return (row.filename === this.fileName) ? 'active-table-row' : ''
+            },
+            handleTableRowClick(row) {
+                this.loadSongDetail(row.filename)
+            },
+            fetchFolderMusicList() {
+                if (!this.filePath) return
+                this.isTableLoading = true
+                const params = {
+                    file_path: this.filePath,
+                    page: this.tablePage,
+                    page_size: Number(this.tablePageSize) || 128,
+                    search_word: this.searchWord || '',
+                    sorted_field: this.sortedField.length > 0 ? this.sortedField[0] : ''
+                }
+                this.$api.Task.folderMusicList(params).then((res) => {
+                    this.isTableLoading = false
+                    if (res.result && res.data) {
+                        this.folderMusicList = res.data.items || []
+                        this.folderMusicTotal = res.data.total || 0
+                    } else {
+                        this.folderMusicList = []
+                        this.folderMusicTotal = 0
+                    }
+                }).catch(() => {
+                    this.isTableLoading = false
+                })
             },
             // checkbox
             nodeCheckTwo(node, checked) {
@@ -932,6 +1489,7 @@
                         this.$cwMessage('标题不能为空', 'error')
                         return
                     }
+                    this.activeRightTab = 'searchList'
                     this.showTranslation = false
                     this.fadeShowDetail = false
                     this.$api.Task.fetchId3Title({
@@ -947,7 +1505,9 @@
             translation() {
                 if (!this.musicInfo.lyrics) {
                     this.$cwMessage('歌词不能为空', 'error')
+                    return
                 }
+                this.activeRightTab = 'translation'
                 this.fadeShowDetail = false
                 this.showTranslation = true
                 this.$api.Task.translationLyc({
@@ -970,12 +1530,16 @@
                         this.$cwMessage(res.message, 'error')
                     }
                 })
+                this.tablePage = 1
+                this.fetchFolderMusicList()
             },
             // 过滤搜索
             handleSearch() {
                 this.$refs.tree1.searchNode(this.searchWord)
                 const searchResult = this.$refs.tree1.getSearchResult()
                 this.isEmpty = searchResult.isEmpty
+                this.tablePage = 1
+                this.fetchFolderMusicList()
             },
             // 保存音乐信息
             handleClick() {
@@ -990,6 +1554,7 @@
                     if (res.result) {
                         this.$cwMessage('修改成功', 'success')
                         this.$store.commit('setHasMsg', true)
+                        this.fetchFolderMusicList()
                     } else {
                         this.$cwMessage('修改失败', 'error')
                     }
@@ -1009,13 +1574,19 @@
                                 'music_info': this.musicInfoManual
                             }).then((res) => {
                                 this.isLoading = false
-                                console.log(res)
                                 if (res.result) {
-                                    this.$cwMessage('修改成功', 'success')
+                                    const total = res.data ? res.data.total : 0
+                                    this.$cwMessage(`批量修改任务已在后台多线程启动（共 ${total} 首），请在右上角查看进度`, 'success')
+                                    this.$store.commit('setHasMsg', true)
+                                } else {
+                                    this.$cwMessage('提交失败: ' + (res.message || ''), 'error')
                                 }
+                            }).catch(() => {
+                                this.isLoading = false
                             })
                             return true
                         } catch (e) {
+                            this.isLoading = false
                             console.warn(e)
                             return false
                         }
@@ -1037,14 +1608,19 @@
                                 'music_info': this.musicInfoManual
                             }).then((res) => {
                                 this.isLoading = false
-                                console.log(res)
                                 if (res.result) {
-                                    this.$cwMessage('创建成功', 'success')
+                                    const total = res.data ? res.data.total : 0
+                                    this.$cwMessage(`自动刮削任务已在后台多线程启动（共 ${total} 首），请在右上角查看进度`, 'success')
                                     this.$store.commit('setHasMsg', true)
+                                } else {
+                                    this.$cwMessage('提交失败: ' + (res.message || ''), 'error')
                                 }
+                            }).catch(() => {
+                                this.isLoading = false
                             })
                             return true
                         } catch (e) {
+                            this.isLoading = false
                             console.warn(e)
                             return false
                         }
@@ -1095,7 +1671,11 @@
             },
             handleRes(response) {
                 if (response.result) {
-                    this.musicInfo.album_img = response.data
+                    let dataUrl = response.data
+                    if (dataUrl && !dataUrl.startsWith('data:image/')) {
+                        dataUrl = 'data:image/jpeg;base64,' + dataUrl
+                    }
+                    this.musicInfo.album_img = dataUrl
                     return true
                 } else {
                     return false
@@ -1103,11 +1683,349 @@
             },
             handleResBatch(response) {
                 if (response.result) {
-                    this.musicInfoManual.album_img = response.data
+                    let dataUrl = response.data
+                    if (dataUrl && !dataUrl.startsWith('data:image/')) {
+                        dataUrl = 'data:image/jpeg;base64,' + dataUrl
+                    }
+                    this.musicInfoManual.album_img = dataUrl
                     return true
                 } else {
                     return false
                 }
+            },
+            // 表头与多属性批量修改相关方法
+            renderHeaderWithBatch(h, { column }, field, label) {
+                return h('div', {
+                    class: 'custom-table-header-cell',
+                    style: {
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: column.align === 'center' ? 'center' : 'flex-start',
+                        width: '100%'
+                    }
+                }, [
+                    h('span', label),
+                    h('i', {
+                        class: 'bk-icon icon-edit header-batch-icon',
+                        attrs: {
+                            title: `批量修改【${label}】`
+                        },
+                        on: {
+                            click: (e) => {
+                                e.stopPropagation()
+                                this.openMultiBatchModal(field)
+                            }
+                        }
+                    })
+                ])
+            },
+            handleTableSelectionChange(selection) {
+                this.tableSelectedRows = selection
+            },
+            clearTableSelection() {
+                if (this.$refs.musicTable) {
+                    this.$refs.musicTable.clearSelection()
+                }
+                this.tableSelectedRows = []
+            },
+            getFileStatus(row) {
+                if (!row || !row.filename) return 'none'
+                const item = this.batchStatusMap[row.filename]
+                if (item && item.state) {
+                    return item.state
+                }
+                return row.state || 'none'
+            },
+            getFileStatusExtra(row) {
+                if (!row || !row.filename) return ''
+                const item = this.batchStatusMap[row.filename]
+                if (item && item.extra) {
+                    return item.extra
+                }
+                return row.extra || ''
+            },
+            openMultiBatchModal(field = 'title') {
+                if (!this.filePath) {
+                    this.$cwMessage('请先在左侧选择一个文件夹', 'warning')
+                    return
+                }
+                if (this.tableSelectedRows.length > 0) {
+                    this.batchScope = 'selected'
+                } else {
+                    this.batchScope = 'all'
+                }
+                if (field && this.batchFieldsEnabled[field] !== undefined) {
+                    this.activeBatchTab = field
+                    this.batchFieldsEnabled[field] = true
+                }
+                this.batchModalVisible = true
+            },
+            closeMultiBatchModal() {
+                this.batchModalVisible = false
+            },
+            insertVariableTag(tag) {
+                const cfg = this.batchConfig[this.activeBatchTab]
+                if (cfg) {
+                    cfg.template = (cfg.template || '') + tag
+                }
+            },
+            applyPreset(presetKey) {
+                const f = this.activeBatchTab
+                const cfg = this.batchConfig[f]
+                if (!cfg) return
+
+                if (f === 'title') {
+                    if (presetKey === 'filename_no_ext') {
+                        cfg.template = '${filename_no_ext}'
+                        cfg.trim_start = 0
+                        cfg.trim_end = 0
+                        cfg.replace_search = ''
+                        cfg.replace_with = ''
+                        cfg.regex_search = ''
+                        cfg.regex_replace = ''
+                        cfg.strip = true
+                    } else if (presetKey === 'artist_title') {
+                        cfg.template = '${artist} - ${title}'
+                    } else if (presetKey === 'remove_brackets') {
+                        cfg.regex_search = '\\s*[\\(\\[【（].*?[\\)\\]】）]'
+                        cfg.regex_replace = ''
+                    } else if (presetKey === 'underscore_to_space') {
+                        cfg.replace_search = '_'
+                        cfg.replace_with = ' '
+                    }
+                } else if (f === 'filename') {
+                    if (presetKey === 'artist_title') {
+                        cfg.template = '${artist} - ${title}'
+                    } else if (presetKey === 'track_title') {
+                        cfg.template = '${tracknumber}.${title}'
+                    } else if (presetKey === 'underscore_to_space') {
+                        cfg.replace_search = '_'
+                        cfg.replace_with = ' '
+                    }
+                } else if (f === 'artist') {
+                    if (presetKey === 'from_albumartist') {
+                        cfg.template = '${albumartist}'
+                    } else if (presetKey === 'underscore_to_space') {
+                        cfg.replace_search = '_'
+                        cfg.replace_with = ' '
+                    }
+                } else if (f === 'album') {
+                    if (presetKey === 'from_title') {
+                        cfg.template = '${title}'
+                    } else if (presetKey === 'from_filename') {
+                        cfg.template = '${filename_no_ext}'
+                    }
+                } else if (f === 'albumartist') {
+                    if (presetKey === 'from_artist') {
+                        cfg.template = '${artist}'
+                    }
+                }
+            },
+            handleBatchCoverUploadRes(response) {
+                if (response.result && response.data) {
+                    let dataUrl = response.data
+                    if (!dataUrl.startsWith('data:image/')) {
+                        dataUrl = 'data:image/jpeg;base64,' + dataUrl
+                    }
+                    this.batchConfig.album_img.img_base64 = dataUrl
+                    this.batchConfig.album_img.preview_url = dataUrl
+                    this.batchConfig.album_img.clear_cover = false
+                    this.batchFieldsEnabled.album_img = true
+                    this.batchCoverFiles = [{
+                        name: 'cover.jpg',
+                        status: 'done',
+                        url: dataUrl
+                    }]
+                    this.$cwMessage('封面图片上传成功', 'success')
+                    return true
+                } else {
+                    this.$cwMessage('图片上传失败', 'error')
+                    return false
+                }
+            },
+            removeBatchCover() {
+                this.batchConfig.album_img.img_base64 = ''
+                this.batchConfig.album_img.preview_url = ''
+                this.batchCoverFiles = []
+                this.batchReloadImg = false
+                this.$nextTick(() => {
+                    this.batchReloadImg = true
+                })
+            },
+            handleClearCoverChange(val) {
+                if (val) {
+                    this.batchConfig.album_img.img_base64 = ''
+                    this.batchConfig.album_img.preview_url = ''
+                    this.batchCoverFiles = []
+                    this.batchReloadImg = false
+                    this.$nextTick(() => {
+                        this.batchReloadImg = true
+                    })
+                }
+            },
+            evaluateFieldPreview(song, fieldName) {
+                if (!song) return ''
+                if (fieldName === 'album_img') return ''
+                const config = this.batchConfig[fieldName]
+                if (!config) return song[fieldName] || ''
+
+                const filename = song.filename || ''
+                const extMatch = filename.lastIndexOf('.')
+                const filenameNoExt = extMatch !== -1 ? filename.substring(0, extMatch) : filename
+                const ext = extMatch !== -1 ? filename.substring(extMatch + 1) : ''
+
+                const varDict = {
+                    filename: filename,
+                    filename_no_ext: filenameNoExt,
+                    basename: filenameNoExt,
+                    title: song.title || '',
+                    artist: song.artist || '',
+                    album: song.album || '',
+                    albumartist: song.albumartist || '',
+                    tracknumber: song.tracknumber || '',
+                    year: song.year || '',
+                    genre: song.genre || ''
+                }
+
+                let val = config.template || ''
+                val = val.replace(/\$\{(.*?)\}/g, (match, p1) => {
+                    const k = p1.trim()
+                    return varDict[k] !== undefined ? varDict[k] : match
+                })
+
+                const trimStart = Number(config.trim_start) || 0
+                const trimEnd = Number(config.trim_end) || 0
+                if (trimStart > 0) {
+                    val = val.substring(trimStart)
+                }
+                if (trimEnd > 0) {
+                    val = val.substring(0, Math.max(0, val.length - trimEnd))
+                }
+
+                if (config.replace_search) {
+                    val = val.split(config.replace_search).join(config.replace_with || '')
+                }
+
+                if (config.regex_search) {
+                    try {
+                        const re = new RegExp(config.regex_search, 'g')
+                        val = val.replace(re, config.regex_replace || '')
+                    } catch (e) {
+                        // ignore regex pattern error during live typing
+                    }
+                }
+
+                if (config.strip) {
+                    val = val.trim()
+                }
+
+                if (fieldName === 'filename' && ext) {
+                    if (!val.endsWith('.' + ext)) {
+                        val = val + '.' + ext
+                    }
+                }
+
+                return val
+            },
+            handleConfirmMultiBatch() {
+                if (!this.hasAnyFieldEnabled) {
+                    this.$cwMessage('请至少勾选启用一个需要修改的属性', 'warning')
+                    return
+                }
+
+                const musicInfo = {
+                    transform_rules: {}
+                }
+
+                if (this.batchFieldsEnabled.album_img) {
+                    if (this.batchConfig.album_img.clear_cover) {
+                        musicInfo.clear_cover = true
+                    } else if (this.batchConfig.album_img.img_base64) {
+                        musicInfo.album_img = this.batchConfig.album_img.img_base64
+                    }
+                    musicInfo.is_save_album_cover = this.batchConfig.album_img.is_save_album_cover
+                }
+
+                const textFields = ['filename', 'title', 'artist', 'album', 'albumartist', 'year', 'genre']
+                for (const f of textFields) {
+                    if (this.batchFieldsEnabled[f]) {
+                        musicInfo[f] = this.batchConfig[f].template
+                        musicInfo.transform_rules[f] = {
+                            trim_start: this.batchConfig[f].trim_start,
+                            trim_end: this.batchConfig[f].trim_end,
+                            replace_search: this.batchConfig[f].replace_search,
+                            replace_with: this.batchConfig[f].replace_with,
+                            regex_search: this.batchConfig[f].regex_search,
+                            regex_replace: this.batchConfig[f].regex_replace,
+                            strip: this.batchConfig[f].strip
+                        }
+                    }
+                }
+
+                const isApplyToAll = this.batchScope === 'all'
+                const selectData = isApplyToAll ? [] : this.tableSelectedRows.map(r => ({ name: r.filename, icon: 'icon-music' }))
+
+                this.isBatchSubmitting = true
+                this.$api.Task.batchUpdateId3({
+                    file_full_path: this.filePath,
+                    select_data: selectData,
+                    apply_to_all: isApplyToAll,
+                    music_info: musicInfo
+                }).then((res) => {
+                    this.isBatchSubmitting = false
+                    if (res.result) {
+                        const total = res.data ? res.data.total : 0
+                        const batchId = res.data ? res.data.batch : ''
+                        this.batchModalVisible = false
+
+                        // 将受影响行立即标为 wait (待修改)
+                        const targetRows = isApplyToAll ? this.folderMusicList : this.tableSelectedRows
+                        targetRows.forEach(row => {
+                            if (row && row.filename) {
+                                this.$set(this.batchStatusMap, row.filename, { state: 'wait', extra: '' })
+                            }
+                        })
+
+                        this.$cwMessage(`批量修改任务已提交（共 ${total} 首），请在列表中查看实时进度`, 'success')
+                        this.startBatchStatusPolling(batchId)
+                    } else {
+                        this.$cwMessage('提交失败: ' + (res.message || ''), 'error')
+                    }
+                }).catch(() => {
+                    this.isBatchSubmitting = false
+                })
+            },
+            startBatchStatusPolling(batchId) {
+                if (!batchId) return
+                this.currentBatchId = batchId
+                if (this.batchPollTimer) {
+                    clearInterval(this.batchPollTimer)
+                }
+                this.batchPollTimer = setInterval(() => {
+                    this.$api.Task.batchProgress({
+                        batch: this.currentBatchId,
+                        include_records: true
+                    }).then(pres => {
+                        if (pres.result && pres.data) {
+                            const records = pres.data.records || {}
+                            for (const fn in records) {
+                                this.$set(this.batchStatusMap, fn, records[fn])
+                            }
+                            if (pres.data.is_done) {
+                                clearInterval(this.batchPollTimer)
+                                this.batchPollTimer = null
+                                this.$cwMessage(`批量修改已全部完成（共 ${pres.data.total} 首，成功 ${pres.data.success} 首）`, 'success')
+                                this.fetchFolderMusicList()
+                                if (this.fileName) {
+                                    this.loadSongDetail(this.fileName)
+                                }
+                            }
+                        }
+                    }).catch(() => {
+                        clearInterval(this.batchPollTimer)
+                        this.batchPollTimer = null
+                    })
+                }, 1000)
             }
         }
     }
@@ -1245,11 +2163,171 @@
         height: calc(100vh - 75px);
         min-width: 400px;
         flex: 1;
-        overflow: scroll;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
         border: 1px solid #173769;
         margin: 10px 10px 10px 0;
         border-radius: 20px;
     }
+}
+
+.resource-header {
+    flex-shrink: 0;
+    border-bottom: 1px solid #eef0f5;
+    background: #ffffff;
+}
+
+.file-list-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 44px;
+    padding: 0 16px;
+}
+
+.subview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 44px;
+    padding: 0 16px;
+    background: #f8fafc;
+}
+
+.size-btn {
+    cursor: pointer;
+    font-weight: 700;
+    margin-right: 12px;
+    color: #495060;
+    transition: all 0.2s;
+    user-select: none;
+    line-height: 1;
+}
+
+.size-btn.size-small {
+    font-size: 13px;
+}
+
+.size-btn.size-medium {
+    font-size: 15px;
+}
+
+.size-btn.size-large {
+    font-size: 18px;
+}
+
+.size-btn.active-size {
+    color: #7c6cf0 !important;
+}
+
+.toolbar-label {
+    font-size: 13px;
+    color: #63656e;
+    margin-left: 12px;
+    margin-right: 6px;
+}
+
+.page-size-select {
+    height: 26px;
+    padding: 0 6px;
+    border: 1px solid #c4c6cc;
+    border-radius: 2px;
+    background: #ffffff;
+    font-size: 12px;
+    color: #63656e;
+    outline: none;
+    cursor: pointer;
+}
+
+.page-size-select:focus {
+    border-color: #7c6cf0;
+}
+
+.total-count-text {
+    font-size: 13px;
+    color: #979ba5;
+    user-select: none;
+}
+
+.table-container {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.table-cover-box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+}
+
+.table-cover-box.cover-small {
+    width: 28px;
+    height: 28px;
+}
+
+.table-cover-box.cover-medium {
+    width: 36px;
+    height: 36px;
+}
+
+.table-cover-box.cover-large {
+    width: 46px;
+    height: 46px;
+}
+
+.table-cover-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 4px;
+    object-fit: cover;
+    display: block;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.table-cover-placeholder {
+    width: 100%;
+    height: 100%;
+    border-radius: 4px;
+    background: #e6e8ee;
+    display: block;
+}
+
+.pill-badge {
+    display: inline-block;
+    padding: 0 8px;
+    height: 18px;
+    line-height: 16px;
+    border-radius: 10px;
+    font-size: 11px;
+    border: 1px solid #b8aeff;
+    color: #8c7af8;
+    background: transparent;
+    user-select: none;
+    text-align: center;
+    box-sizing: border-box;
+}
+
+.pill-badge.pill-badge-has {
+    border-color: #7c6cf0;
+    color: #7c6cf0;
+    font-weight: 600;
+}
+
+.active-table-row {
+    background-color: #ecf3fe !important;
+}
+
+.table-pagination-wrap {
+    padding: 10px 16px;
+    border-top: 1px solid #f0f1f5;
+    display: flex;
+    justify-content: flex-end;
+    background: #ffffff;
 }
 
 .bk-form-checkbox {
@@ -1357,5 +2435,420 @@ button.bk-button-text {
 
 .can-copy {
     cursor: pointer;
+}
+
+/* 批量修改与表头操作样式 */
+.custom-table-header-cell {
+    display: inline-flex;
+    align-items: center;
+    position: relative;
+}
+
+.header-batch-icon {
+    margin-left: 5px;
+    font-size: 13px;
+    color: #979ba5;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+.header-batch-icon:hover {
+    color: #3a84ff;
+    background: #e1ecff;
+    transform: scale(1.15);
+}
+
+.batch-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 18px;
+}
+
+.batch-status-badge i {
+    margin-right: 3px;
+    font-size: 12px;
+}
+
+.status-none {
+    background: #f0f1f5;
+    color: #979ba5;
+    border: 1px solid #dcdee5;
+}
+
+.status-wait {
+    background: #fff4e5;
+    color: #ff9c01;
+    border: 1px solid #ffd699;
+}
+
+.status-running {
+    background: #e1ecff;
+    color: #3a84ff;
+    border: 1px solid #a3c5fd;
+}
+
+.status-success {
+    background: #e4faf0;
+    color: #10c17a;
+    border: 1px solid #85e8ba;
+}
+
+.status-failed {
+    background: #ffebeb;
+    color: #ea3636;
+    border: 1px solid #fd9c9c;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.spin-icon {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+}
+
+.batch-modal-body {
+    padding: 4px 0;
+}
+
+.batch-scope-bar {
+    display: flex;
+    align-items: center;
+    background: #f5f7fa;
+    padding: 8px 14px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+
+.scope-label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #313238;
+    margin-right: 12px;
+}
+
+.scope-tip {
+    margin-left: 14px;
+    font-size: 12px;
+    color: #979ba5;
+}
+
+.batch-field-pills-wrap {
+    margin-bottom: 12px;
+}
+
+.pills-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #313238;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.batch-field-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.field-pill-item {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    background: #fff;
+    border: 1px solid #dcdee5;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.field-pill-item:hover {
+    border-color: #3a84ff;
+}
+
+.field-pill-item.pill-active {
+    border-color: #3a84ff;
+    background: #f0f5ff;
+    box-shadow: 0 0 0 1px #3a84ff;
+}
+
+.field-pill-item .pill-name {
+    margin-left: 6px;
+    font-size: 13px;
+    color: #63656e;
+}
+
+.field-pill-item.pill-active .pill-name {
+    color: #3a84ff;
+    font-weight: 500;
+}
+
+.pill-badge-check {
+    margin-left: 6px;
+    font-size: 10px;
+    background: #3a84ff;
+    color: #fff;
+    padding: 0 4px;
+    border-radius: 2px;
+    line-height: 14px;
+}
+
+.batch-config-panel {
+    border: 1px solid #dcdee5;
+    border-radius: 4px;
+    padding: 14px 16px;
+    background: #fafbfd;
+    margin-bottom: 14px;
+}
+
+.preset-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.preset-label {
+    font-size: 12px;
+    color: #63656e;
+    font-weight: bold;
+    width: 90px;
+    flex-shrink: 0;
+}
+
+.preset-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.template-input-row {
+    margin-bottom: 12px;
+}
+
+.input-head {
+    margin-bottom: 6px;
+}
+
+.input-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #313238;
+}
+
+.var-tags-row {
+    display: flex;
+    align-items: flex-start;
+    margin-top: 8px;
+}
+
+.var-tag-label {
+    font-size: 12px;
+    color: #979ba5;
+    margin-right: 6px;
+    white-space: nowrap;
+    line-height: 22px;
+}
+
+.var-tags-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.var-tag-btn {
+    display: inline-block;
+    font-size: 11px;
+    color: #3a84ff;
+    background: #e1ecff;
+    padding: 2px 7px;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 1px solid #c5daff;
+    transition: all 0.15s;
+    user-select: none;
+}
+
+.var-tag-btn:hover {
+    background: #3a84ff;
+    color: #fff;
+}
+
+.trim-config-box {
+    border-top: 1px dashed #dcdee5;
+    padding-top: 10px;
+    margin-top: 6px;
+}
+
+.trim-box-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #63656e;
+    margin-bottom: 8px;
+}
+
+.trim-box-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+}
+
+.trim-field-group {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    color: #63656e;
+}
+
+.trim-field-label {
+    font-weight: bold;
+    margin-right: 4px;
+}
+
+.sub-label {
+    margin: 0 4px;
+}
+
+.batch-preview-container {
+    margin-top: 12px;
+}
+
+.preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.preview-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #313238;
+}
+
+.preview-table-wrap {
+    max-height: 160px;
+    overflow-y: auto;
+    border: 1px solid #dcdee5;
+    border-radius: 4px;
+}
+
+.batch-preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    table-layout: fixed;
+}
+
+.batch-preview-table th, .batch-preview-table td {
+    border: 1px solid #f0f1f5;
+    padding: 6px 10px;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.batch-preview-table th {
+    background: #f5f7fa;
+    color: #63656e;
+    font-weight: bold;
+}
+
+.filename-cell {
+    color: #313238;
+    font-weight: 500;
+}
+
+.preview-cover-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cover-thumb-box {
+    width: 28px;
+    height: 28px;
+    border-radius: 2px;
+    overflow: hidden;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #dcdee5;
+    background: #fff;
+}
+
+.thumb-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.thumb-none, .thumb-clear, .thumb-keep {
+    font-size: 10px;
+    color: #979ba5;
+}
+
+.thumb-clear {
+    color: #ea3636;
+    font-weight: bold;
+}
+
+.preview-text-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+}
+
+.diff-old {
+    color: #979ba5;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.diff-arrow {
+    color: #3a84ff;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.diff-new {
+    color: #10c17a;
+    font-weight: 500;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.batch-dialog-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    padding: 10px 0 0 0;
+}
+
+.footer-left-info {
+    font-size: 13px;
+    color: #63656e;
+}
+
+.footer-left-info strong {
+    color: #3a84ff;
+    font-size: 15px;
 }
 </style>

@@ -53,7 +53,7 @@
     }
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .monitor-logo {
     width: 32px;
     height: 32px;
@@ -64,17 +64,12 @@
     height: 32px;
 }
 </style>
-<style lang="scss">
-.bk-wrapper {
-    .bk-navigation-wrapper {
-        .navigation-container {
-            max-width: calc(100%) !important;
-
-            .container-content {
-                padding: 0;
-            }
-        }
-    }
+<style>
+.bk-wrapper .bk-navigation-wrapper .navigation-container {
+    max-width: calc(100%) !important;
+}
+.bk-wrapper .bk-navigation-wrapper .navigation-container .container-content {
+    padding: 0;
 }
 .bk-navigation-header {
     background-color: #ffffff !important;

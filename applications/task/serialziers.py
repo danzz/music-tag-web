@@ -43,6 +43,7 @@ class BatchUpdateId3Serializer(serializers.Serializer):
     file_full_path = serializers.JSONField(required=True)
     music_info = serializers.JSONField(required=True)
     select_data = serializers.JSONField(required=True)
+    apply_to_all = serializers.BooleanField(required=False, default=False)
 
 
 class FetchId3ByTitleSerializer(serializers.Serializer):
@@ -76,7 +77,8 @@ class TaskSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
     def get_message(self, obj):
-        return f"【{obj.song_name}】 未找到标签或修改失败！"
+        reason = getattr(obj, "extra", "") or "未找到标签或修改失败！"
+        return f"【{obj.song_name}】 {reason}"
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -90,3 +92,20 @@ class TaskSerializer(serializers.ModelSerializer):
 
 class UploadImageSerializer(serializers.Serializer):
     upload_file = serializers.ImageField(required=True)
+
+
+class RetryFailedSerializer(serializers.Serializer):
+    batch = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    source_list = serializers.ListField(required=False)
+    select_mode = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+
+class FolderMusicListSerializer(serializers.Serializer):
+    file_path = serializers.CharField(required=True)
+    page = serializers.IntegerField(required=False, default=1)
+    page_size = serializers.IntegerField(required=False, default=128)
+    search_word = serializers.CharField(required=False, allow_null=True, allow_blank=True, default='')
+    sorted_field = serializers.CharField(required=False, allow_null=True, allow_blank=True, default='')
+    sort_order = serializers.CharField(required=False, allow_null=True, allow_blank=True, default='asc')
+
+

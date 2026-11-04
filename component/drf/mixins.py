@@ -16,6 +16,9 @@ class ApiGenericMixin(object):
     def finalize_response(self, request, response, *args, **kwargs):
         """统一返回数据格式"""
 
+        if not isinstance(response, Response):
+            return response
+
         if response.status_code == 403:
             pass
         if response.data is None:
