@@ -37,8 +37,6 @@ INSTALLED_APPS = [
     "rest_framework",
     "applications.task",
     "applications.user",
-    "applications.music",
-    "applications.subsonic",
     # "django_extensions",
 
 ]
@@ -191,5 +189,4 @@ BASE_URL = "https://music.163.com/"
 REVERSE_PROXY_TYPE = "nginx"
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
-SUBSONIC_DEFAULT_TRANSCODING_FORMAT = "mp3"
 SITE_LOGIN = os.getenv("SITE_LOGIN", "true")

@@ -22,4 +22,4 @@ class TaskRecord(models.Model):
     state = models.CharField(max_length=255, default="wait")
     extra = models.TextField(default="")
     created_at = models.DateTimeField(null=True, auto_now_add=True)
-    batch = models.CharField(max_length=255, default="")
+    batch = models.CharField(max_length=255, default="", db_index=True)

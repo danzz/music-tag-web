@@ -21,7 +21,7 @@ from applications.task.services.music_ids import MusicIDS
 from applications.task.services.music_resource import MusicResource
 from applications.task.services.update_ids import update_music_info, update_music_info_async
 from applications.task.services import folder_music_service
-from applications.task.tasks import full_scan_folder, scan, clear_music, batch_auto_tag_task, tidy_folder_task, process_single_auto_tag_task
+from applications.task.tasks import batch_auto_tag_task, tidy_folder_task, process_single_auto_tag_task
 from applications.utils.translation import translation_lyc_text
 from component.drf.viewsets import GenericViewSet
 from django_vue_cli.celery_app import app as celery_app
@@ -285,7 +285,7 @@ class TaskViewSets(GenericViewSet):
                     file_type = each.split(".")[-1].lower()
                     if file_type not in allow_type:
                         continue
-                    item = copy.deepcopy(music_info)
+                    item = dict(music_info)
                     item_path = os.path.normpath(entry.path)
                     item.update({
                         "file_full_path": item_path,
@@ -314,7 +314,7 @@ class TaskViewSets(GenericViewSet):
                         file_type = each.split(".")[-1].lower()
                         if file_type not in allow_type:
                             continue
-                        item = copy.deepcopy(music_info)
+                        item = dict(music_info)
                         item_path = os.path.normpath(f"{file_full_path}/{each}")
                         item.update({
                             "file_full_path": item_path,
@@ -332,7 +332,7 @@ class TaskViewSets(GenericViewSet):
                         music_id3_info.append(item)
                 else:
                     item_path = os.path.normpath(f"{full_path}/{data.get('name')}")
-                    item = copy.deepcopy(music_info)
+                    item = dict(music_info)
                     name = data.get('name', '')
                     item.update({
                         "file_full_path": item_path,
@@ -351,8 +351,8 @@ class TaskViewSets(GenericViewSet):
 
         if bulk_records:
             TaskRecord.objects.bulk_create(bulk_records, batch_size=500)
-            created_records = TaskRecord.objects.filter(batch=timestamp).exclude(icon="icon-folder")
-            record_map = {os.path.normpath(r.full_path): r.id for r in created_records}
+            created_records = TaskRecord.objects.filter(batch=timestamp).exclude(icon="icon-folder").values_list('id', 'full_path')
+            record_map = {os.path.normpath(fp): rid for rid, fp in created_records}
             for m in music_id3_info:
                 m["task_id"] = record_map.get(os.path.normpath(m["file_full_path"]))
 
@@ -578,21 +578,6 @@ class TaskViewSets(GenericViewSet):
         except Exception:
             return self.success_response()
         return self.success_response(data=active_tasks_data)
-
-    @action(methods=['GET'], detail=False)
-    def task1(self, request, *args, **kwargs):
-        scan.delay()
-        return self.success_response()
-
-    @action(methods=['GET'], detail=False)
-    def task2(self, request, *args, **kwargs):
-        clear_music()
-        return self.success_response()
-
-    @action(methods=['GET'], detail=False)
-    def full_scan_folder(self, request, *args, **kwargs):
-        full_scan_folder.delay()
-        return self.success_response()
 
 
 class TaskModelViewSets(mixins.ListModelMixin,

@@ -1700,36 +1700,51 @@
                 })
             },
             handleBatchAuto() {
+                const selectData = this.tableSelectedRows.length > 0
+                    ? this.tableSelectedRows.map(r => ({ name: r.filename, icon: 'icon-music' }))
+                    : (this.checkedData && this.checkedData.length > 0 ? this.checkedData : [])
+                const isApplyToAll = selectData.length === 0
+
                 this.$bkInfo({
-                    title: '确认要批量修改？',
-                    confirmLoading: true,
+                    title: '确认要自动批量修改？',
+                    confirmLoading: false,
                     confirmFn: () => {
-                        try {
-                            this.isLoading = true
-                            this.musicInfoManual['select_mode'] = this.selectAutoMode
-                            this.musicInfoManual['source_list'] = this.sourceList
-                            this.$api.Task.batchAutoUpdateId3({
-                                'file_full_path': this.filePath,
-                                'select_data': this.checkedData,
-                                'music_info': this.musicInfoManual
-                            }).then((res) => {
-                                this.isLoading = false
-                                if (res.result) {
-                                    const total = res.data ? res.data.total : 0
-                                    this.$cwMessage(`自动刮削任务已在后台多线程启动（共 ${total} 首），请在右上角查看进度`, 'success')
-                                    this.$store.commit('setHasMsg', true)
-                                } else {
-                                    this.$cwMessage('提交失败: ' + (res.message || ''), 'error')
+                        this.exampleSetting1.primary.visible = false
+                        const targetRows = isApplyToAll ? this.folderMusicList : this.tableSelectedRows
+                        targetRows.forEach(row => {
+                            if (row && row.filename) {
+                                this.$set(this.batchStatusMap, row.filename, { state: 'wait', extra: '' })
+                            }
+                        })
+                        this.$cwMessage('自动匹配修改任务已提交，后台正在处理中...', 'primary')
+
+                        this.musicInfoManual['select_mode'] = this.selectAutoMode
+                        this.musicInfoManual['source_list'] = this.sourceList
+                        this.$api.Task.batchAutoUpdateId3({
+                            'file_full_path': this.filePath,
+                            'select_data': selectData,
+                            'music_info': this.musicInfoManual
+                        }).then((res) => {
+                            if (res.result) {
+                                const batchId = res.data ? res.data.batch : ''
+                                this.startBatchStatusPolling(batchId)
+                            } else {
+                                this.$cwMessage('提交失败: ' + (res.message || ''), 'error')
+                                targetRows.forEach(row => {
+                                    if (row && row.filename) {
+                                        this.$delete(this.batchStatusMap, row.filename)
+                                    }
+                                })
+                            }
+                        }).catch(() => {
+                            this.$cwMessage('自动匹配任务提交异常', 'error')
+                            targetRows.forEach(row => {
+                                if (row && row.filename) {
+                                    this.$delete(this.batchStatusMap, row.filename)
                                 }
-                            }).catch(() => {
-                                this.isLoading = false
                             })
-                            return true
-                        } catch (e) {
-                            this.isLoading = false
-                            console.warn(e)
-                            return false
-                        }
+                        })
+                        return true
                     }
                 })
             },
@@ -2070,35 +2085,46 @@
 
                 const isApplyToAll = this.batchScope === 'all'
                 const selectData = isApplyToAll ? [] : this.tableSelectedRows.map(r => ({ name: r.filename, icon: 'icon-music' }))
+                const targetSongsCount = this.targetSongsCount
 
-                this.isBatchSubmitting = true
+                // 立即关闭批量修改弹窗，立刻回到文件列表页面，不阻塞用户操作
+                this.batchModalVisible = false
+                this.isBatchSubmitting = false
+
+                // 将受影响行立即标为 wait (待修改)
+                const targetRows = isApplyToAll ? this.folderMusicList : this.tableSelectedRows
+                targetRows.forEach(row => {
+                    if (row && row.filename) {
+                        this.$set(this.batchStatusMap, row.filename, { state: 'wait', extra: '' })
+                    }
+                })
+
+                this.$cwMessage('批量修改任务已提交（共 ' + targetSongsCount + ' 首），正在后台处理中...', 'primary')
+
                 this.$api.Task.batchUpdateId3({
                     file_full_path: this.filePath,
                     select_data: selectData,
                     apply_to_all: isApplyToAll,
                     music_info: musicInfo
                 }).then((res) => {
-                    this.isBatchSubmitting = false
                     if (res.result) {
-                        const total = res.data ? res.data.total : 0
                         const batchId = res.data ? res.data.batch : ''
-                        this.batchModalVisible = false
-
-                        // 将受影响行立即标为 wait (待修改)
-                        const targetRows = isApplyToAll ? this.folderMusicList : this.tableSelectedRows
-                        targetRows.forEach(row => {
-                            if (row && row.filename) {
-                                this.$set(this.batchStatusMap, row.filename, { state: 'wait', extra: '' })
-                            }
-                        })
-
-                        this.$cwMessage(`批量修改任务已提交（共 ${total} 首），请在列表中查看实时进度`, 'success')
                         this.startBatchStatusPolling(batchId)
                     } else {
-                        this.$cwMessage('提交失败: ' + (res.message || ''), 'error')
+                        this.$cwMessage('批量修改提交失败: ' + (res.message || ''), 'error')
+                        targetRows.forEach(row => {
+                            if (row && row.filename) {
+                                this.$delete(this.batchStatusMap, row.filename)
+                            }
+                        })
                     }
                 }).catch(() => {
-                    this.isBatchSubmitting = false
+                    this.$cwMessage('批量修改请求异常', 'error')
+                    targetRows.forEach(row => {
+                        if (row && row.filename) {
+                            this.$delete(this.batchStatusMap, row.filename)
+                        }
+                    })
                 })
             },
             startBatchStatusPolling(batchId) {
@@ -2106,8 +2132,9 @@
                 this.currentBatchId = batchId
                 if (this.batchPollTimer) {
                     clearInterval(this.batchPollTimer)
+                    this.batchPollTimer = null
                 }
-                this.batchPollTimer = setInterval(() => {
+                const poll = () => {
                     this.$api.Task.batchProgress({
                         batch: this.currentBatchId,
                         include_records: true
@@ -2118,8 +2145,10 @@
                                 this.$set(this.batchStatusMap, fn, records[fn])
                             }
                             if (pres.data.is_done) {
-                                clearInterval(this.batchPollTimer)
-                                this.batchPollTimer = null
+                                if (this.batchPollTimer) {
+                                    clearInterval(this.batchPollTimer)
+                                    this.batchPollTimer = null
+                                }
                                 this.$cwMessage(`批量修改已全部完成（共 ${pres.data.total} 首，成功 ${pres.data.success} 首）`, 'success')
                                 this.fetchFolderMusicList()
                                 if (this.fileName) {
@@ -2128,10 +2157,15 @@
                             }
                         }
                     }).catch(() => {
-                        clearInterval(this.batchPollTimer)
-                        this.batchPollTimer = null
+                        if (this.batchPollTimer) {
+                            clearInterval(this.batchPollTimer)
+                            this.batchPollTimer = null
+                        }
                     })
-                }, 1000)
+                }
+                // 立即执行第一次获取进度，随后每 800ms 轮询一次
+                poll()
+                this.batchPollTimer = setInterval(poll, 800)
             }
         }
     }
