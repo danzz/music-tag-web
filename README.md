@@ -6,10 +6,8 @@
 <div align="center">
 
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
-[![Docker Pulls](https://img.shields.io/docker/pulls/xhongc/music_tag_web?color=0db7ed&logo=docker&logoColor=white)](https://hub.docker.com/r/xhongc/music_tag_web)
 [![Platform](https://img.shields.io/badge/Platform-amd64%20%7C%20arm64-blueviolet.svg)](#-docker-一键部署指南)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Stars](https://img.shields.io/github/stars/xhongc/music-tag-web?color=informational&logo=github)](https://github.com/xhongc/music-tag-web/stargazers)
 
 </div>
 
