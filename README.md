@@ -1,186 +1,185 @@
-![](img_6.jpg)
+# 🚀 Music Tag Web
 
-# 🚀 Music Tag Web | Self-hosted Docker 音乐刮削器 NAS无损曲库元数据批量管理工具
-[简体中文](README.md) | [English](readme_en.md)
+**高性能自托管 Docker 音乐标签与元数据批量管理工具**  
+*专为 NAS、Homelab、私有音乐服务器打造的 Navidrome / Jellyfin / Emby / Plex 最佳边车伴侣*
 
-<a href="https://hellogithub.com/repository/d1919a26b74b40f19240da9f2ee3f7a3" target="_blank"><img src="https://abroad.hellogithub.com/v1/widgets/recommend.svg?rid=d1919a26b74b40f19240da9f2ee3f7a3&claim_uid=JQPHiFh3t5mqG1M" alt="Featured｜HelloGitHub" style="width: 250px; height: 54px;" width="250" height="54" /></a>
-![star](https://atomgit.com/xhongc/music-tag-web/star/badge.svg)
+<div align="center">
 
-## 项目简介
-Music Tag Web 是一款**开源 self-hosted 自托管 Docker 音乐标签编辑器**，专为 NAS、远程影音服务器、Homelab 自建玩家打造，可在线编辑歌曲标题、专辑、艺术家、歌词、专辑封面等完整音频元数据，完美作为 Navidrome / Jellyfin 配套边车工具，替代本地 MP3Tag、MusicBrainz Picard。
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Docker Pulls](https://img.shields.io/docker/pulls/xhongc/music_tag_web?color=0db7ed&logo=docker&logoColor=white)](https://hub.docker.com/r/xhongc/music_tag_web)
+[![Platform](https://img.shields.io/badge/Platform-amd64%20%7C%20arm64-blueviolet.svg)](#-docker-一键部署指南)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Stars](https://img.shields.io/github/stars/xhongc/music-tag-web?color=informational&logo=github)](https://github.com/xhongc/music-tag-web/stargazers)
 
-支持 FLAC, APE, WAV, AIFF, WV, TTA, MP3, M4A, OGG, MPC, OPUS, WMA, DSF, MP4 全格式音频 ID3 标签批量编辑、刮削、修复整理，所有曲库文件本地存储不上传第三方，隐私安全，适配群晖、威联通、Linux 小主机 Docker 部署。
-<div class="column" align="middle">
-    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.9-blue.svg" alt=""></a>
-   <img src="https://img.shields.io/github/stars/xhongc/music-tag-web?color=informational&label=Stars">
-  <img src="https://img.shields.io/docker/pulls/xhongc/music_tag_web" alt="docker-pull-count" />
-  <img src="https://img.shields.io/badge/platform-amd64/arm64-pink?style=plastic" alt="docker-platform" />
 </div>
 
-# 🎉 核心功能 Feature（Self-hosted Docker 专属优势）
-为什么开发 Web 自托管版本？
-很多自建 Navidrome / Jellyfin 的用户音乐文件存放在远程 NAS、Linux 服务器，本地 MP3Tag、MusicBrainz Picard 仅能操作本机文件，无法远程修改服务器无损曲库元数据。
-Music Tag Web 采用 Docker 容器一键部署，作为影音服务配套边车应用，浏览器远程管理本地私有曲库，是 Homelab 影音爱好者刚需自托管音乐元数据工具。
+---
 
-- 全格式音频文件本地元数据查看、单条/批量编辑、修复 ID3 标签
-- 批量自动刮削音乐标签，自动匹配专辑信息、艺术家、歌词、封面
-- 内置音乐指纹识别，无标签、文件名混乱歌曲自动识别匹配元数据
-- 智能整理本地音乐文件，按艺术家、专辑自动分组，支持自定义多级曲库分类
-- 多维度文件排序：文件名、文件大小、文件更新时间
-- 批量繁简转换，一键转换歌曲、专辑、艺术家标签简体/繁体
-- 文件名拆分解包，自动从文件名提取缺失歌曲、歌手、专辑信息补全标签
-- 批量文本替换，清理曲库脏标签、乱码、多余特殊字符
-- 集成 ffmpeg，支持无损音乐格式批量转换
-- 整轨 APE/FLAC/CUE 文件自动切割分轨并补全独立标签
-- 多源音乐元数据接口，多渠道兜底刮削曲库信息
-- 内嵌歌词翻译，批量双语歌词写入音频文件
-- 完整操作日志记录，追溯标签修改记录
-- 批量导出/自定义上传替换专辑封面
-- 全响应式移动端 UI，手机浏览器远程访问 NAS 曲库改标签
-- 适配小爱同学本地曲库播放，直接读取 NAS 无损音乐文件
-- 兼容各类私人网盘挂载曲库在线播放与标签编辑
-- 播放数据统计，柱形图、折线图可视化曲库播放记录
+## 📖 项目简介
 
+**Music Tag Web** 是一款轻量、现代化且高效的**自托管（Self-hosted）Web 音乐标签与元数据管理工具**。
 
-# 🦀 项目演示 Demo
-在线演示地址（体验批量修改音乐标签、自托管Web端操作效果）
-DEMO 地址账号密码为：admin/admin
+### 为什么需要 Music Tag Web？
+在搭建 Navidrome、Jellyfin、Plex、Subsonic 等私有影音服务的过程中，音乐文件通常持久保存在远程 NAS 或 Linux 服务器上。传统的本地桌面端工具（如 Mp3tag、MusicBrainz Picard）必须依赖网络挂载（Samba/NFS/WebDAV），在面对庞大曲库时不仅载入极其缓慢，批量写入还极易因网络抖动造成元数据写入中断甚至文件损坏。
 
-[【音乐标签Web｜Music Tag Web 自托管Docker音乐元数据工具演示】](http://117.72.222.188:8002/#/)
+**Music Tag Web 采用纯容器化部署，直接以边车（Sidecar）模式运行在存放曲库的服务器端**：
+- **服务端直接 I/O**：所有读写操作均在宿主机本地磁盘完成，修改瞬间生效，完全规避网络传输损耗。
+- **全格式支持**：支持 `FLAC`, `APE`, `WAV`, `AIFF`, `WV`, `TTA`, `MP3`, `M4A`, `OGG`, `MPC`, `OPUS`, `WMA`, `DSF`, `DFF`, `MP4` 等几乎全部主流音频格式的 ID3 / Vorbis Comment 元数据管理。
+- **隐私与安全**：曲库全部本地处理，无需上传私有音频，适配群晖（Synology）、威联通（QNAP）、绿联（UGREEN）、极空间、Unraid、TrueNAS 及各类 Linux 服务器。
 
+---
 
-# 💯 使用部署指南 How to Use
-完整图文教程文档：
-[【使用手册】](https://xiers-organization.gitbook.io/music-tag-web/)
+## 🖼️ 界面效果预览
 
-[【使用手册V2（新版Docker部署推荐）】](https://xiers-organization.gitbook.io/music-tag-web-v2/)
+### 1. 现代化音乐管理工作台
+> 集成目录面包屑跳转、封面极速懒加载、LRC 歌词状态胶囊、Tt 字号调节、平滑过渡刮削候选与单曲编辑抽屉。
 
-> V2 为当前推荐部署方式，所有 NAS、Linux Homelab 用户优先使用手册 V2 部署！
+![工作台概览](docs/images/workspace_overview.png)
 
-## V1 旧版 Docker 容器部署方式
-镜像已上传至 Docker Hub，支持 amd64 / arm64 架构群晖、威联通、树莓派设备一键安装：
+### 2. 独立任务中心与批量状态管理
+> 全局异步任务监控抽屉，汇总展示成功、失败与排队状态，支持条件筛选、关键字搜索、断点续跑与失败重试。
 
-### 1. 从Docker Hub拉取自托管音乐标签工具镜像
+![任务中心抽屉](docs/images/task_center_drawer.png)
+
+---
+
+## ✨ 核心特性
+
+### ⚡ 极致性能与缓存架构
+- **秒级分页加载**：支持 32 / 64 / 128 / 256 / 512 / 1000 档位自适应分页，万首歌曲大目录秒级开启，告别页面卡死。
+- **双层缓存加速**：采用数据库持久化缓存（`MusicMetaCache`）配合内存缓存，避免重复解析音频 ID3 头；专辑封面按需异步流式加载。
+- **一键强制刷新**：针对手动替换文件场景，提供“强制刷新”功能，一键清空本地及服务端缓存并深度重扫磁盘。
+
+### 📋 可靠的任务中心与断点续跑
+- **可视化任务统计**：顶部常驻动态任务徽标，抽屉内直观呈现“全部记录”、“失败任务”、“进行中/排队”、“已成功”汇总卡片。
+- **智能队列管理**：支持按批次与状态筛选历史操作，支持针对报错原因（如网络超时、源无匹配）一键重新提交单条或整批任务。
+- **中断恢复机制**：服务重启或意外中断后，支持一键继续执行所有排队中未完成任务（`resume_pending`），批量处理无忧。
+
+### 🛡️ 针对 NAS 机械硬盘深度优化
+- **单进程高并发协程**：底层采用 Gunicorn + Gevent 架构，内存占用极低，高并发读取流畅。
+- **磁盘写入节流保护**：内置独立专用磁盘写入线程池（默认 4 线程），避免大批量写入时机械硬盘磁头剧烈寻道与 I/O 争抢。
+- **存储友好型 SQLite**：针对 NAS/NFS/SMB 网络共享存储优化，使用安全无 mmap 的 `TRUNCATE` 模式与长超时忙等待，彻底避免 WAL 锁死问题。
+
+### 🎯 丰富的标签处理工具箱
+- **多数据源在线刮削**：多渠道官方音乐接口兜底匹配，自动补全歌曲标题、艺术家、专辑、发行年份、风格、歌词与高清封面。
+- **内置音频声学指纹**：对“Track01.mp3”等完全无标签且文件名混乱的文件，利用音频波形特征提取识别，精准补全元数据。
+- **批量文本替换与转换**：支持简繁体一键互相转换、批量标签属性替换与正则清洗。
+- **文件名解包提取**：根据自定义格式（如 `${artist} - ${title}`）自动拆解文件名，回填缺失的标签信息。
+- **智能曲库归类整理**：支持根据标签变量规则（如 `${artist}/${album}/`）自动重命名文件并建立多级归类文件夹。
+- **双语歌词与分轨支持**：支持嵌入歌词翻译、生成独立同名 `.lrc` 歌词文件，集成整轨无损音频（FLAC/APE/CUE）检测与处理。
+
+---
+
+## 🐳 Docker 一键部署指南
+
+官方镜像已全面支持 `linux/amd64` 与 `linux/arm64` 跨平台架构（群晖、威联通、树莓派等直接开箱即用）。
+
+### 方式一：Docker CLI 快速运行（推荐）
+
 ```bash
-docker pull xhongc/music_tag_web:latest
+docker run -d \
+  --name music-tag-web \
+  -p 8001:8001 \
+  -e DJANGO_SECRET_KEY="$(openssl rand -hex 32)" \
+  -v /volume1/music:/app/media:rw \
+  -v /volume1/docker/music-tag/config:/app/data:rw \
+  --restart=unless-stopped \
+  xhongc/music_tag_web:latest
 ```
 
-先生成并保存一个每个部署独有的 Django 密钥，然后将其作为 `DJANGO_SECRET_KEY` 传入容器：
-```bash
-export DJANGO_SECRET_KEY="$(openssl rand -hex 32)"
-```
+> 💡 **参数说明**：
+> - `/volume1/music`：替换为您 NAS 或服务器中存放音乐的实际绝对路径（容器内只读或读写挂载 `/app/media`）。
+> - `/volume1/docker/music-tag/config`：替换为您希望保存系统配置与数据库的持久化目录（映射至 `/app/data`）。
+> - `DJANGO_SECRET_KEY`：用于 JWT 鉴权签名的唯一密钥，建议使用 `openssl rand -hex 32` 生成，请妥善保存。
 
-### 2. 运行Docker容器镜像（挂载本地NAS音乐目录）
-```bash
-docker run -d -p 8001:8001 -e DJANGO_SECRET_KEY="$DJANGO_SECRET_KEY" -v /path/to/your/music:/app/media -v /path/to/your/config:/app/data --restart=always xhongc/music_tag_web:latest
-```
-或者 使用 Portainer Stacks 可视化部署 docker compose（NAS用户常用）
-   ![img_1.png](img_1.png)
+---
+
+### 方式二：Docker Compose 编排部署
+
+在目标目录创建 `docker-compose.yml`：
 
 ```yaml
 version: '3'
 
 services:
-  music-tag:
+  music-tag-web:
     image: xhongc/music_tag_web:latest
     container_name: music-tag-web
     ports:
       - "8001:8001"
     environment:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set a unique DJANGO_SECRET_KEY}"
+      # 可选：自定义服务端口（默认为 8001）
+      # PORT: 8001
+      # 可选：磁盘写入并发线程数（默认为 4，保护机械硬盘）
+      # WRITE_WORKER_NUM: 4
+      # 可选：Gunicorn 进程数（默认为 1，单进程共享协程堆内存）
+      # GUNICORN_WORKER_NUM: 1
     volumes:
       - /path/to/your/music:/app/media:rw
-      - /path/to/your/config:/app/data
-    command: /start
+      - /path/to/your/config:/app/data:rw
     restart: unless-stopped
 ```
-> 重要说明：`/path/to/your/music` 替换为你的NAS/服务器本地音乐文件夹路径！`/path/to/your/config` 改为持久化配置文件路径！
 
-3. 访问地址：127.0.0.1:8001/admin，默认账号密码 admin/admin，首次登录务必修改默认密码
-![img_7.png](img_7.png)
-
-## V2 新版推荐部署方式（主流 self-hosted 用户首选）
-> V2 与 V1部署区别：容器内部服务端口调整为 8002，Docker Compose 部署移除 `command: /start` 配置，兼容性更好，适配绝大多数NAS系统
-
-### 1. 拉取最新Docker镜像
+启动容器：
 ```bash
-docker pull xhongc/music_tag_web:latest
+# 生成安全密钥并启动
+export DJANGO_SECRET_KEY="$(openssl rand -hex 32)"
+docker-compose up -d
 ```
 
-### 2. 一键运行容器命令
+---
+
+## 🔑 访问与初始配置
+
+1. 打开浏览器访问：`http://<您的服务器IP>:8001/`
+2. **默认管理员账号**：`admin`
+3. **默认管理员密码**：`admin`
+4. **安全提示**：首次登录后，请务必前往右上角菜单 **「后台管理」**（或直接访问 `http://<您的服务器IP>:8001/admin/`）修改管理员密码！
+
+---
+
+## ⚙️ 核心环境变量与配置说明
+
+| 环境变量 | 默认值 | 作用与说明 |
+| :--- | :--- | :--- |
+| `DJANGO_SECRET_KEY` | *(必填)* | 系统安全签名密钥，请配置随机长字符串保障安全 |
+| `PORT` | `8001` | 容器内部 Gunicorn 监听端口，宿主机端口映射请同步调整 |
+| `WRITE_WORKER_NUM` | `4` | 磁盘写入并发线程池大小；对于机械硬盘曲库建议保持 2~4，避免磁头争抢寻道 |
+| `GUNICORN_WORKER_NUM` | `1` | Gunicorn 工作进程数；单进程 + Gevent 协程架构可确保任务中心共享内存状态 |
+| `WORKER_NUM` | `8` | 异步请求与在线刮削最大工作线程数 |
+
+---
+
+## 🛠️ 本地测试与二次开发
+
+本项目配备了完整的自动化本地测试环境与构建脚本：
+
 ```bash
-docker run -d -p 8002:8002 -e DJANGO_SECRET_KEY="$DJANGO_SECRET_KEY" -v /path/to/your/music:/app/media -v /path/to/your/config:/app/data --restart=always xhongc/music_tag_web:latest
+# 1. 启动完全隔离的独立本地测试环境 (端口 18002，自带预置测试曲库)
+./start_test_env.sh
+
+# 2. 重新生成/重置测试曲库样本 (覆盖 MP3/FLAC/M4A/LRC 全场景)
+python3 scripts/generate_test_library.py
+
+# 3. 运行端到端集成测试脚本
+python3 scripts/test_workflow.py
+
+# 4. 前端独立编译 (Web 目录)
+cd web && NODE_OPTIONS=--openssl-legacy-provider npm run build && cd ..
+
+# 5. 一键打包并发布正式生产镜像
+./build_release.sh music-tag-web:latest
+
+# 6. 停止测试环境
+./stop_test_env.sh
 ```
-docker-compose.yml 完整配置（Portainer/群晖容器管理器直接复制使用）：
-```yaml
-version: '3'
 
-services:
-  music-tag:
-    image: xhongc/music_tag_web:latest
-    container_name: music-tag-web
-    ports:
-      - "8002:8002"
-    environment:
-      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set a unique DJANGO_SECRET_KEY}"
-    volumes:
-      - /path/to/your/music:/app/media:rw
-      - /path/to/your/config:/app/data
-    restart: unless-stopped
-```
-> 提示：`/path/to/your/music` 替换NAS本地无损曲库目录；`/path/to/your/config` 自定义配置持久化目录！
+---
 
-3. 本地访问地址：127.0.0.1:8002/admin，默认账号密码 admin/admin，上线前修改管理员密码
+## 📜 免责声明
 
-
-# 📷 V2 版本操作界面 User Interface
-远程浏览器批量管理NAS音乐标签、刮削元数据、整理曲库完整界面展示
-![img_13.png](img_13.png)
-![img_15.png](img_15.png)
-![img_16.png](img_16.png)
-![img_17.png](img_17.png)
-![img_18.png](img_18.png)
-![img_19.png](img_19.png)
-![img_12.png](img_12.png)
-
-# 💬 交流与反馈 Contact me
-如果你在 self-hosted Docker 部署、NAS目录挂载、Navidrome 联动、批量标签刮削过程中遇到报错、功能需求，欢迎先 Star 项目后提交 issues。
-issue 回复延迟可加入社群交流部署踩坑、曲库整理技巧；也可添加作者微信：charlesnowed（备注：**Music Tag**），拉你进交流群。
-
-<div>
-<img  src="/img0904.jpg" width="250">  &nbsp;
-</div>
-
-## 官方发布&交流频道：
-[t.me/music_tag_web](https://t.me/music_tag_web)
-
-[MusicTag Web 自托管影音交流群](https://t.me/+oTffyBoNALM3Yzll)
-
-QQ1群：55893996 （已满）
-
-QQ2群：79502786（NAS/Docker影音自建玩家交流）
-
-# 💸 赞助与支持
-如果这款 self-hosted Docker 音乐标签工具帮你整理好了NAS无损曲库、解决Navidrome标签混乱问题，可以请作者喝杯咖啡。
-您的支持是持续更新自托管功能、适配更多NAS设备的动力, 谢谢您! (｡･∀･)ﾉﾞ
-
-[➡ 爱发电](https://ifdian.net/a/music-tag-web)
-
-# 🌟 Star History
-开源自托管音乐元数据工具项目增长趋势
-
-[![Star History Chart](https://api.star-history.com/svg?repos=xhongc/music-tag-web&type=Date)](https://star-history.com/#xhongc/music-tag-web&Date)
-
-<!--
-self-hosted, music tag editor, docker music metadata tool, NAS flac tagger, navidrome sidecar tag editor, jellyfin batch id3 editor, homelab music manager, 自托管音乐标签工具, docker音乐元数据编辑器, 群晖音乐批量改标签, 威联通无损曲库整理, 替代mp3tag网页版, 音乐指纹识别刮削标签, 本地私有曲库管理
--->
-
-# 免责声明
-禁止任何形式的商业用途，包括但不仅限于售卖/打赏/获利，不得使用本代码进行任何形式的牟利/贩卖/传播，再次强调仅供个人私下研究学习技术使用，**本自托管项目仅编辑本地已有音乐文件元数据，不提供下载音乐本体！**
-本项目仅以纯粹的技术目的去学习研究，如有侵犯到任何人的合法权利，请致信408737515@qq.com，我将在第一时间修改删除相关代码，谢谢！
-
-本项目基于 GPL V3.0 许可证发行，以下协议是对于 GPL V3.0 的补充，如有冲突，以以下协议为准。
-
-词语约定：本协议中的“本项目”指music-tag-web项目；“使用者”指签署本协议的使用者；“官方音乐平台”指对本项目内置的包括酷我、网易云、QQ音乐、咪咕、酷狗音乐、酷我音乐等音乐源的官方平台统称；“版权数据”指包括但不限于图像、音频、名字、歌词等在内的他人拥有所属版权的数据。
-
-本项目的数据来源原理是从各官方音乐平台的公开服务器中拉取数据，经过对数据简单地筛选与合并后进行展示，因此本项目不对数据的准确性负责。 使用本项目的过程中可能会产生版权数据，对于这些版权数据，本项目不拥有它们的所有权，为了避免造成侵权，使用者务必在24小时内清除使用本项目的过程中所产生的版权数据。 本项目内的官方音乐平台别名为本项目内对官方音乐平台的一个称呼，不包含恶意，如果官方音乐平台觉得不妥，可联系本项目更改或移除。 本项目内使用的部分包括但不限于字体、图片等资源来源于互联网，如果出现侵权可联系本项目移除。 由于使用本项目产生的包括由于本协议或由于使用或无法使用本项目而引起的任何性质的任何直接、间接、特殊、偶然或结果性损害（包括但不限于因商誉损失、停工、计算机故障或故障引起的损害赔偿，或任何及所有其他商业损害或损失）由使用者负责。 本项目完全免费，仅供个人私下小范围研究交流学习 python 技术使用, 且开源发布于 GitHub 面向全世界人用作对技术的学习交流，本项目不对项目内的技术可能存在违反当地法律法规的行为作保证，禁止在违反当地法律法规的情况下使用本项目，对于使用者在明知或不知当地法律法规不允许的情况下使用本项目所造成的任何违法违规行为由使用者承担，本项目不承担由此造成的任何直接、间接、特殊、偶然或结果性责任。 若你使用了本项目，将代表你接受以上协议。
+1. 本项目基于 **GPL V3.0** 开源许可证发行。
+2. 本项目为开源自托管工具，**仅供个人用于学习、研究技术及管理私有已有音频元数据，不提供任何音频下载或版权数据分发功能**。
+3. 刮削数据来源于公开网络服务接口，本项目不对第三方数据的准确性与完整性承担担保责任。
+4. 禁止将本代码用于任何形式的商业营利行为。因违反所在地法律法规所造成的后果由使用者自行承担。

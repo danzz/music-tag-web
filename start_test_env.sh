@@ -45,7 +45,7 @@ echo "[*] 启动测试容器 (绑定端口: ${TEST_PORT})..."
 docker run -d --name "${CONTAINER_NAME}" \
   -p "${TEST_PORT}:8001" \
   -e DJANGO_SECRET_KEY="test-environment-secret-key-123456" \
-  -e WORKER_NUM=8 \
+  -e WORKER_NUM=1 \
   -v "${SCRIPT_DIR}/test_environment/media:/app/media:rw" \
   -v "${SCRIPT_DIR}/test_environment/config:/app/data:rw" \
   --restart=unless-stopped \

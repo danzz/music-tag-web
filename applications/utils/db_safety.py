@@ -20,13 +20,14 @@ def is_sqlite():
 
 
 def setup_sqlite_pragma():
-    """为 SQLite 连接配置 WAL 模式与忙等待超时"""
+    """为 SQLite 连接配置安全无 mmap 的 TRUNCATE 模式与忙等待超时"""
     if is_sqlite():
         try:
             with connection.cursor() as cursor:
-                cursor.execute('PRAGMA journal_mode = WAL;')
+                cursor.execute('PRAGMA mmap_size = 0;')
+                cursor.execute('PRAGMA journal_mode = TRUNCATE;')
                 cursor.execute('PRAGMA synchronous = NORMAL;')
-                cursor.execute('PRAGMA busy_timeout = 10000;')
+                cursor.execute('PRAGMA busy_timeout = 15000;')
         except Exception as e:
             logger.warning(f"Failed to configure SQLite PRAGMA: {e}")
 

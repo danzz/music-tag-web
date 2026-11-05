@@ -7,7 +7,8 @@ set -o nounset
 
 python manage.py migrate --run-syncdb
 PORT=${PORT:-8001}
-WORKERS=${WORKER_NUM:-4}
+# 单进程 + Gevent 协程架构，共享单一 Python 堆内存任务中心
+WORKERS=${GUNICORN_WORKER_NUM:-1}
 exec gunicorn -w ${WORKERS} -b 0.0.0.0:${PORT} django_vue_cli.wsgi:application --timeout 120 --worker-class=gevent --worker-connections=1000
 
 #python manage.py runserver 0.0.0.0:8001

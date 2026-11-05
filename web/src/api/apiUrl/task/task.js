@@ -40,6 +40,21 @@ export default {
     getRecord: function(params) {
         return GET(reUrl + '/api/record/', params)
     },
+    getRecordStats: function(params) {
+        return GET(reUrl + '/api/record/stats/', params)
+    },
+    clearRecord: function(params) {
+        return POST(reUrl + '/api/record/clear/', params)
+    },
+    retrySingleRecord: function(params) {
+        return POST(reUrl + '/api/record/retry_single/', params)
+    },
+    resumePending: function(params) {
+        return POST(reUrl + '/api/record/resume_pending/', params)
+    },
+    forceRefreshCache: function(params) {
+        return POST(reUrl + '/api/force_refresh_cache/', params)
+    },
     batchProgress: function(params) {
         return GET(reUrl + '/api/batch_progress/', params)
     },

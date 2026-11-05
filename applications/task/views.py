@@ -12,11 +12,11 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 
 from applications.task.constants import ALLOW_TYPE
-from applications.task.filters import TaskFilters
+from applications.task.filters import TaskFilters, TaskRecordFilters
 from applications.task.models import TaskRecord, Task
 from applications.task.serialziers import FileListSerializer, Id3Serializer, UpdateId3Serializer, \
     FetchId3ByTitleSerializer, FetchLlyricSerializer, BatchUpdateId3Serializer, TranslationLycSerializer, \
-    TidyFolderSerializer, TaskSerializer, UploadImageSerializer, RetryFailedSerializer, FolderMusicListSerializer
+    TidyFolderSerializer, TaskSerializer, TaskRecordSerializer, UploadImageSerializer, RetryFailedSerializer, FolderMusicListSerializer
 from applications.task.services.music_ids import MusicIDS
 from applications.task.services.music_resource import MusicResource
 from applications.task.services.update_ids import update_music_info, update_music_info_async
@@ -25,6 +25,35 @@ from applications.task.tasks import batch_auto_tag_task, tidy_folder_task, proce
 from applications.utils.translation import translation_lyc_text
 from component.drf.viewsets import GenericViewSet
 from django_vue_cli.celery_app import app as celery_app
+
+
+from django.views.decorators.csrf import csrf_exempt
+from django.http import StreamingHttpResponse
+from rest_framework.renderers import BaseRenderer
+
+class ServerSentEventRenderer(BaseRenderer):
+    media_type = 'text/event-stream'
+    format = 'txt'
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return data
+
+
+@csrf_exempt
+def events_view(request):
+    """
+    SSE (Server-Sent Events) 原生 Django 实时数据流推送
+    绕过 DRF Content Negotiation，完全兼容任何浏览器 EventSource Accept 头
+    """
+    last_event_id = request.META.get('HTTP_LAST_EVENT_ID', 0)
+    from applications.task.services.task_store import task_store
+    response = StreamingHttpResponse(
+        task_store.subscribe_events(last_event_id=last_event_id),
+        content_type='text/event-stream'
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    return response
 
 
 @method_decorator(gzip_page, name="dispatch")
@@ -76,30 +105,15 @@ class TaskViewSets(GenericViewSet):
                 try:
                     if entry.is_dir():
                         dir_name = entry.name.encode('utf-8', 'replace').decode()
-                        has_sub = False
-                        try:
-                            with os.scandir(entry.path) as sub_entries:
-                                for sub in sub_entries:
-                                    if sub.is_dir():
-                                        has_sub = True
-                                        break
-                        except Exception:
-                            pass
-
                         node_info = {
                             "id": dir_index,
                             "name": dir_name,
                             "title": dir_name,
                             "path": os.path.normpath(entry.path.encode('utf-8', 'replace').decode()),
                             "icon": "icon-folder",
-                            "is_dir": True
+                            "is_dir": True,
+                            "async": True,
                         }
-                        if has_sub:
-                            node_info["async"] = True
-                        else:
-                            node_info["children"] = []
-                            node_info["async"] = False
-
                         dir_children.append(node_info)
                         dir_index += 1
                 except Exception:
@@ -136,7 +150,9 @@ class TaskViewSets(GenericViewSet):
             file_name = ".".join(each.split(".")[:-1])
             if file_type in ["lrc", "txt"]:
                 frc_map[file_name] = each
-        task_map = dict(Task.objects.filter(parent_path=file_path).values_list("filename", "state"))
+        from applications.task.services.task_store import task_store
+        active_states = task_store.get_active_path_states(file_path)
+        task_map = {fn: info.get("state", "null") for fn, info in active_states.items()}
         for index, entry in enumerate(file_data, 1):
             each = entry.get("name")
             file_type = each.split(".")[-1]
@@ -204,9 +220,9 @@ class TaskViewSets(GenericViewSet):
             sorted_field=sorted_field,
             sort_order=sort_order
         )
-        norm_file_path = os.path.normpath(file_path)
-        task_qs = Task.objects.filter(parent_path=norm_file_path).values("filename", "state", "extra")
-        task_map = {t["filename"]: t for t in task_qs}
+        from applications.task.services.task_store import task_store
+        filenames = [item["filename"] for item in res_data.get("items", [])]
+        task_map = task_store.get_active_path_states(file_path, filenames)
         for item in res_data.get("items", []):
             task_info = task_map.get(item["filename"])
             if task_info:
@@ -229,6 +245,7 @@ class TaskViewSets(GenericViewSet):
             return HttpResponse(status=404)
         response = HttpResponse(img_bytes, content_type=mime)
         response['Cache-Control'] = 'no-cache, must-revalidate'
+        response['Pragma'] = 'no-cache'
         return response
 
     @action(methods=['POST'], detail=False)
@@ -255,6 +272,12 @@ class TaskViewSets(GenericViewSet):
         """更新音乐id3信息"""
         validate_data = self.is_validated_data(request.data)
         music_id3_info = validate_data['music_id3_info']
+        from applications.task.services.task_store import task_store
+        paths = [item.get('file_full_path') for item in music_id3_info if item.get('file_full_path')]
+        has_active, count, samples = task_store.check_active_tasks(paths)
+        if has_active:
+            sample_str = "、".join(samples)
+            return self.failure_response(msg=f"该歌曲（{sample_str}）当前正在后台处理中，请等待处理完成后再保存！")
         update_music_info(music_id3_info, False)
         for item in music_id3_info:
             folder_music_service.invalidate_cache(item.get('file_full_path', ''))
@@ -262,7 +285,7 @@ class TaskViewSets(GenericViewSet):
 
     @action(methods=['POST'], detail=False)
     def batch_update_id3(self, request, *args, **kwargs):
-        """批量更新音乐id3信息 (异步多线程并发版)"""
+        """批量更新音乐id3信息 (异步多线程并发版 - 基于内存/Redis临时任务中心)"""
         validate_data = self.is_validated_data(request.data)
         full_path = os.path.normpath(validate_data['file_full_path'])
         select_data = validate_data['select_data']
@@ -272,7 +295,6 @@ class TaskViewSets(GenericViewSet):
         allow_type = ["flac", "mp3", "ape", "wav", "aiff", "wv", "tta", "m4a", "ogg", "mpc",
                       "opus", "wma", "dsf", "dff"]
         timestamp = str(int(time.time() * 1000))
-        bulk_records = []
 
         if apply_to_all:
             try:
@@ -289,17 +311,9 @@ class TaskViewSets(GenericViewSet):
                     item_path = os.path.normpath(entry.path)
                     item.update({
                         "file_full_path": item_path,
-                        "filename": each
+                        "filename": each,
+                        "song_name": ".".join(each.split(".")[:-1])
                     })
-                    song_name = ".".join(each.split(".")[:-1])
-                    record = TaskRecord(
-                        batch=timestamp,
-                        song_name=song_name,
-                        full_path=item_path,
-                        icon="icon-music",
-                        state="wait"
-                    )
-                    bulk_records.append(record)
                     music_id3_info.append(item)
         else:
             for data in select_data:
@@ -318,17 +332,9 @@ class TaskViewSets(GenericViewSet):
                         item_path = os.path.normpath(f"{file_full_path}/{each}")
                         item.update({
                             "file_full_path": item_path,
-                            "filename": each
+                            "filename": each,
+                            "song_name": ".".join(each.split(".")[:-1])
                         })
-                        song_name = ".".join(each.split(".")[:-1])
-                        record = TaskRecord(
-                            batch=timestamp,
-                            song_name=song_name,
-                            full_path=item_path,
-                            icon="icon-music",
-                            state="wait"
-                        )
-                        bulk_records.append(record)
                         music_id3_info.append(item)
                 else:
                     item_path = os.path.normpath(f"{full_path}/{data.get('name')}")
@@ -336,51 +342,78 @@ class TaskViewSets(GenericViewSet):
                     name = data.get('name', '')
                     item.update({
                         "file_full_path": item_path,
-                        "filename": name
+                        "filename": name,
+                        "song_name": ".".join(name.split(".")[:-1])
                     })
-                    song_name = ".".join(name.split(".")[:-1])
-                    record = TaskRecord(
-                        batch=timestamp,
-                        song_name=song_name,
-                        full_path=item_path,
-                        icon="icon-music",
-                        state="wait"
-                    )
-                    bulk_records.append(record)
                     music_id3_info.append(item)
 
-        if bulk_records:
-            TaskRecord.objects.bulk_create(bulk_records, batch_size=500)
-            created_records = TaskRecord.objects.filter(batch=timestamp).exclude(icon="icon-folder").values_list('id', 'full_path')
-            record_map = {os.path.normpath(fp): rid for rid, fp in created_records}
-            for m in music_id3_info:
-                m["task_id"] = record_map.get(os.path.normpath(m["file_full_path"]))
+        target_paths = [item["file_full_path"] for item in music_id3_info]
+        from applications.task.services.task_store import task_store
+        has_active, count, samples = task_store.check_active_tasks(target_paths)
+        if has_active:
+            sample_str = "、".join(samples)
+            if count > len(samples):
+                sample_str += f" 等共 {count} 首"
+            return self.failure_response(msg=f"检测到所选范围内有歌曲（{sample_str}）正在处理或排队中，请等待当前任务全部执行完毕后再提交！")
 
+        task_store.init_batch(timestamp, music_id3_info, task_type="manual_update")
         update_music_info_async(timestamp, music_id3_info, False)
         return self.success_response(data={"batch": timestamp, "total": len(music_id3_info)})
 
     @action(methods=['POST'], detail=False)
     def batch_auto_update_id3(self, request, *args, **kwargs):
-        """批量自动刮削音乐id3信息 (异步多线程并发版)"""
+        """批量自动刮削音乐id3信息 (异步多线程并发版 - 基于内存/Redis临时任务中心)"""
         validate_data = self.is_validated_data(request.data)
-        full_path = validate_data['file_full_path']
+        full_path = os.path.normpath(validate_data['file_full_path'])
         select_data = validate_data['select_data']
         music_info = validate_data['music_info']
         select_mode = music_info["select_mode"]
         source_list = music_info.get("source_list", [])
         timestamp = str(int(time.time() * 1000))
-        bulk_set = []
+        allow_type = ["flac", "mp3", "ape", "wav", "aiff", "wv", "tta", "m4a", "ogg", "mpc",
+                      "opus", "wma", "dsf", "dff"]
+
+        task_items = []
         for each in select_data:
             name = each.get("name")
-            song_name = ".".join(name.split(".")[:-1])
-            bulk_set.append(TaskRecord(**{
-                "song_name": song_name,
-                "full_path": f"{full_path}/{name}",
-                "icon": each.get("icon"),
-                "batch": timestamp
-            }))
-        TaskRecord.objects.bulk_create(bulk_set, batch_size=500)
-        total = batch_auto_tag_task(timestamp, source_list, select_mode)
+            if each.get("icon") == "icon-folder":
+                folder_path = os.path.normpath(f"{full_path}/{name}")
+                try:
+                    entries = list(os.scandir(folder_path))
+                except Exception:
+                    continue
+                for entry in entries:
+                    if entry.is_file():
+                        fname = entry.name
+                        ftype = fname.split(".")[-1].lower()
+                        if ftype in allow_type:
+                            sname = ".".join(fname.split(".")[:-1])
+                            task_items.append({
+                                "file_full_path": os.path.normpath(entry.path),
+                                "filename": fname,
+                                "song_name": sname,
+                                "artist": ""
+                            })
+            else:
+                sname = ".".join(name.split(".")[:-1])
+                task_items.append({
+                    "file_full_path": os.path.normpath(f"{full_path}/{name}"),
+                    "filename": name,
+                    "song_name": sname,
+                    "artist": ""
+                })
+
+        target_paths = [item["file_full_path"] for item in task_items]
+        from applications.task.services.task_store import task_store
+        has_active, count, samples = task_store.check_active_tasks(target_paths)
+        if has_active:
+            sample_str = "、".join(samples)
+            if count > len(samples):
+                sample_str += f" 等共 {count} 首"
+            return self.failure_response(msg=f"检测到所选范围内有歌曲（{sample_str}）正在处理或排队中，请等待当前任务全部执行完毕后再提交！")
+
+        task_store.init_batch(timestamp, task_items, task_type="auto_tag")
+        total = batch_auto_tag_task(timestamp, task_items, source_list, select_mode)
         return self.success_response(data={"batch": timestamp, "total": total})
 
     @action(methods=['GET'], detail=False)
@@ -390,40 +423,22 @@ class TaskViewSets(GenericViewSet):
         if not batch:
             return self.failure_response(msg="缺少 batch 参数")
 
-        from applications.task.services.async_executor import executor
-        progress = executor.get_progress(batch)
+        include_records = request.query_params.get("include_records", "false").lower() in ("true", "1")
+        from applications.task.services.task_store import task_store
+        progress = task_store.get_batch_progress(batch, include_records=include_records)
         if not progress:
-            total = TaskRecord.objects.filter(batch=batch).exclude(icon="icon-folder").count()
-            finished = TaskRecord.objects.filter(batch=batch, state__in=["success", "failed"]).count()
-            success = TaskRecord.objects.filter(batch=batch, state="success").count()
-            failed = TaskRecord.objects.filter(batch=batch, state="failed").count()
-            is_done = (finished >= total) if total > 0 else True
+            from applications.task.services.async_executor import executor
+            progress = executor.get_progress(batch)
+        if not progress:
             progress = {
                 "batch_id": batch,
-                "total": total,
-                "finished": finished,
-                "success": success,
-                "failed": failed,
-                "is_done": is_done,
-                "percentage": round((finished / total * 100), 1) if total > 0 else 100.0
+                "total": 0,
+                "finished": 0,
+                "success": 0,
+                "failed": 0,
+                "is_done": True,
+                "percentage": 100.0
             }
-
-        include_records = request.query_params.get("include_records", "false").lower() == "true"
-        if include_records:
-            records = TaskRecord.objects.filter(batch=batch).values("id", "full_path", "song_name", "state", "extra")
-            record_map = {}
-            for r in records:
-                fp = r["full_path"]
-                fn = os.path.basename(fp)
-                record_map[fn] = {
-                    "id": r["id"],
-                    "state": r["state"],
-                    "extra": r["extra"],
-                    "filename": fn,
-                    "full_path": fp
-                }
-            progress["records"] = record_map
-
         return self.success_response(data=progress)
 
     @action(methods=['POST'], detail=False)
@@ -434,20 +449,14 @@ class TaskViewSets(GenericViewSet):
         source_list = validate_data.get("source_list") or ["netease", "qmusic", "migu", "kugou"]
         select_mode = validate_data.get("select_mode") or "hard"
 
-        query = TaskRecord.objects.filter(state="failed").exclude(icon="icon-folder")
-        if batch:
-            query = query.filter(batch=batch)
-        failed_tasks = list(query)
+        from applications.task.services.task_store import task_store
+        failed_res = task_store.get_task_records(page=1, page_size=1000, state="failed", batch=batch or "")
+        failed_tasks = failed_res.get("items", [])
         if not failed_tasks:
             return self.success_response(msg="无失败项需要重试", data={"total": 0})
 
         new_batch = str(int(time.time() * 1000))
-        for t in failed_tasks:
-            t.batch = new_batch
-            t.state = "wait"
-            t.extra = ""
-            t.save()
-
+        task_store.init_batch(new_batch, failed_tasks, task_type="auto_tag")
         from applications.task.services.async_executor import executor
         executor.submit_batch(new_batch, failed_tasks, process_single_auto_tag_task, source_list=source_list, select_mode=select_mode, task_type="auto_tag")
         return self.success_response(data={"batch": new_batch, "total": len(failed_tasks)})
@@ -579,9 +588,104 @@ class TaskViewSets(GenericViewSet):
             return self.success_response()
         return self.success_response(data=active_tasks_data)
 
+    @action(methods=['POST'], detail=False)
+    def force_refresh_cache(self, request, *args, **kwargs):
+        """强制清除元数据与封面缓存（内存、SQLite及跨多Worker广播同步）"""
+        file_path = request.data.get('file_path', '')
+        folder_music_service.force_clear_all_caches(file_path)
+        return self.success_response(msg="缓存已强制清空")
 
-class TaskModelViewSets(mixins.ListModelMixin,
-                        GenericViewSet):
-    queryset = Task.objects.order_by("-id")
-    serializer_class = TaskSerializer
-    filterset_class = TaskFilters
+    @action(methods=['GET'], detail=False, permission_classes=[AllowAny], authentication_classes=[], renderer_classes=[ServerSentEventRenderer])
+    def events(self, request, *args, **kwargs):
+        """
+        SSE (Server-Sent Events) 实时数据流推送
+        """
+        return events_view(request)
+
+
+class TaskModelViewSets(GenericViewSet):
+    """任务执行记录与状态视图集（基于内存/Redis的临时过程数据中心）"""
+
+    def list(self, request, *args, **kwargs):
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", 20))
+        state = request.query_params.get("state", "")
+        batch = request.query_params.get("batch", "")
+        search = request.query_params.get("search", "")
+
+        from applications.task.services.task_store import task_store
+        res_data = task_store.get_task_records(page=page, page_size=page_size, state=state, batch=batch, search=search)
+        return self.success_response(data=res_data)
+
+    @action(methods=['GET'], detail=False)
+    def stats(self, request, *args, **kwargs):
+        """获取当前任务统计数量与最近批次列表"""
+        from applications.task.services.task_store import task_store
+        data = task_store.get_stats()
+        return self.success_response(data=data)
+
+    @action(methods=['POST'], detail=False)
+    def clear(self, request, *args, **kwargs):
+        """清空任务记录（可按批次或状态清空）"""
+        batch = request.data.get("batch")
+        state = request.data.get("state")
+        from applications.task.services.task_store import task_store
+        task_store.clear_tasks(batch, state)
+        return self.success_response(msg="临时任务记录已成功清理")
+
+    @action(methods=['POST'], detail=False)
+    def retry_single(self, request, *args, **kwargs):
+        """重试单条失败任务"""
+        record_id = request.data.get("id")
+        if not record_id:
+            return self.failure_response(msg="缺少任务ID")
+        from applications.task.services.task_store import task_store
+        record_data = task_store.retry_single(record_id)
+        if not record_data:
+            return self.failure_response(msg="任务不存在或已过期")
+
+        from applications.task.services.async_executor import executor
+        from applications.task.tasks import process_single_auto_tag_task
+        source_list = ["netease", "qmusic", "migu", "kugou"]
+        executor.executor.submit(process_single_auto_tag_task, record_data, source_list=source_list, select_mode="hard")
+        return self.success_response(msg="已重新提交任务")
+
+    @action(methods=['POST'], detail=False)
+    def resume_pending(self, request, *args, **kwargs):
+        """恢复执行被中断或仍在排队中的未完成任务"""
+        batch = request.data.get("batch", "")
+        from applications.task.services.task_store import task_store
+        pending = task_store.get_pending_tasks(batch=batch, limit=2000)
+        if not pending:
+            return self.success_response(msg="暂无排队中的任务", data={"total": 0})
+
+        from applications.task.services.async_executor import executor
+        from applications.task.services.update_ids import process_single_manual_save
+        from applications.task.tasks import process_single_auto_tag_task
+
+        count = 0
+        manual_items = []
+        auto_items = []
+        for p in pending:
+            item_data = {
+                "task_id": p["id"],
+                "file_full_path": p["full_path"],
+                "filename": os.path.basename(p["full_path"]),
+                "song_name": p["song_name"],
+                "artist": p["artist_name"]
+            }
+            if p.get("tag_source") == "auto_tag":
+                auto_items.append(item_data)
+            else:
+                manual_items.append(item_data)
+
+        first_batch = pending[0].get("batch_id") or str(int(time.time() * 1000))
+        if manual_items:
+            executor.submit_batch(first_batch, manual_items, process_single_manual_save, task_type="manual_update")
+            count += len(manual_items)
+
+        if auto_items:
+            executor.submit_batch(first_batch, auto_items, process_single_auto_tag_task, source_list=["netease", "qmusic", "migu", "kugou"], select_mode="hard", task_type="auto_tag")
+            count += len(auto_items)
+
+        return self.success_response(msg=f"已成功继续执行 {count} 个未完成任务", data={"total": count, "batch": first_batch})

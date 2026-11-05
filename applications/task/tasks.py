@@ -3,36 +3,31 @@ import shutil
 from collections import defaultdict
 
 from applications.task.constants import ALLOW_TYPE
-from applications.task.models import TaskRecord, Task
 from applications.task.services.music_ids import MusicIDS
 from applications.task.utils import match_song
-from applications.utils.db_safety import db_write_safe
 
 
-@db_write_safe
-def update_task_state_safe(task_id, full_path, state, song_name, artist_name, extra=""):
-    TaskRecord.objects.filter(id=task_id).update(state=state, extra=extra)
-    parent_path = os.path.dirname(full_path)
-    filename = os.path.basename(full_path)
-    Task.objects.update_or_create(full_path=full_path, defaults={
-        "state": state,
-        "parent_path": parent_path,
-        "filename": filename,
-        "song_name": song_name,
-        "artist_name": artist_name,
-        "extra": extra,
-    })
+def update_task_state_safe(task_id, full_path, state, song_name, artist_name, extra="", meta=None):
+    from applications.task.services.task_store import task_store
+    task_store.update_item(full_path, state, extra=extra, title=song_name, artist=artist_name, task_id=task_id, meta=meta)
 
 
 def process_single_auto_tag_task(task, source_list, select_mode):
     """
     单首歌曲自动刮削任务单元 (多线程并发执行)
     """
+    task_id = getattr(task, "id", None) or (task.get("id") if isinstance(task, dict) else None)
+    full_path = getattr(task, "full_path", "") or (task.get("full_path") if isinstance(task, dict) else "")
+    song_name = getattr(task, "song_name", "") or (task.get("song_name") if isinstance(task, dict) else "")
+    artist_name = getattr(task, "artist_name", "") or (task.get("artist_name") if isinstance(task, dict) else "")
+
+    update_task_state_safe(task_id, full_path, "running", song_name, artist_name, extra="")
+
     is_match = False
     error_msg = ""
     for resource in source_list:
         try:
-            is_match = match_song(resource, task.full_path, select_mode)
+            is_match = match_song(resource, full_path, select_mode)
         except Exception as e:
             error_msg = f"{resource} 异常: {str(e)}"
             is_match = False
@@ -40,45 +35,34 @@ def process_single_auto_tag_task(task, source_list, select_mode):
             break
 
     if is_match:
-        update_task_state_safe(task.id, task.full_path, "success", task.song_name, task.artist_name, extra="")
+        from applications.task.services.folder_music_service import invalidate_cache, extract_music_meta
+        invalidate_cache(full_path)
+        fn = os.path.basename(full_path)
+        meta = extract_music_meta(full_path, fn, lrc_set=set())
+        update_task_state_safe(
+            task_id,
+            full_path,
+            "success",
+            meta.get("title") or song_name,
+            meta.get("artist") or artist_name,
+            extra="",
+            meta=meta
+        )
         return True
     else:
         fail_reason = error_msg if error_msg else "未匹配到合适的元数据"
-        update_task_state_safe(task.id, task.full_path, "failed", task.song_name, task.artist_name, extra=fail_reason)
+        update_task_state_safe(task_id, full_path, "failed", song_name, artist_name, extra=fail_reason)
         return False
 
 
-def batch_auto_tag_task(batch, source_list, select_mode):
+def batch_auto_tag_task(batch, task_items, source_list, select_mode):
     """
     自动刮削任务（多线程并发版）
     source_list: ["migu", "qmusic", "netease"]
     """
-    folder_list = TaskRecord.objects.filter(batch=batch, icon="icon-folder").all()
-    for folder in folder_list:
-        try:
-            data = os.scandir(folder.full_path)
-            bulk_set = []
-            for entry in data:
-                each = entry.name
-                file_type = each.split(".")[-1]
-                file_name = ".".join(each.split(".")[:-1])
-                if file_type not in ALLOW_TYPE:
-                    continue
-                bulk_set.append(TaskRecord(**{
-                    "batch": batch,
-                    "song_name": file_name,
-                    "full_path": f"{folder.full_path}/{each}",
-                    "icon": "icon-music",
-                }))
-            if bulk_set:
-                TaskRecord.objects.bulk_create(bulk_set)
-        except Exception as e:
-            print(f"Error scanning folder {folder.full_path}: {e}")
-
-    task_list = list(TaskRecord.objects.filter(batch=batch).exclude(icon="icon-folder").all())
     from applications.task.services.async_executor import executor
-    executor.submit_batch(batch, task_list, process_single_auto_tag_task, source_list=source_list, select_mode=select_mode, task_type="auto_tag")
-    return len(task_list)
+    executor.submit_batch(batch, task_items, process_single_auto_tag_task, source_list=source_list, select_mode=select_mode, task_type="auto_tag")
+    return len(task_items)
 
 
 def tidy_folder_task(music_path_list, tidy_config):

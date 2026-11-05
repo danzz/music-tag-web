@@ -10,6 +10,10 @@
                 <bk-button size="small" :text="true" @click="refreshDir" class="nav-act-btn" title="刷新当前目录">
                     <bk-icon type="refresh" style="font-size: 14px; margin-right: 4px;"></bk-icon> 刷新
                 </bk-button>
+                <bk-button size="small" :text="true" @click="handleForceRefreshCache" class="nav-act-btn force-refresh-btn" title="强制清空服务端与本地所有缓存，重新从磁盘深度扫描加载" :loading="isForceRefreshing">
+                    <bk-icon type="refresh" style="font-size: 14px; margin-right: 4px; color: #ff9c01;"></bk-icon>
+                    <span style="color: #ff9c01; font-weight: 500;">强制刷新</span>
+                </bk-button>
             </div>
 
             <!-- 中间面包屑导航或路径直接编辑 -->
@@ -45,8 +49,15 @@
                 </div>
             </div>
 
-            <!-- 右侧动作：浏览目录弹窗、历史记录下拉 -->
+            <!-- 右侧动作：任务列表、浏览目录弹窗、历史记录下拉 -->
             <div class="top-nav-right">
+                <bk-button size="small" :theme="taskStats.failed > 0 ? 'danger' : 'default'" :outline="true" @click="openTaskDrawer" title="查看批量任务执行历史与失败详情" style="margin-right: 8px;">
+                    <bk-icon :type="taskStats.running > 0 || isBatchSubmitting ? 'circle-2-1' : 'order'" :class="{ 'spin-icon': taskStats.running > 0 || isBatchSubmitting }" style="margin-right: 4px;"></bk-icon>
+                    任务列表
+                    <span v-if="taskStats.failed > 0" class="task-badge-pill pill-failed">{{ taskStats.failed }} 失败</span>
+                    <span v-else-if="taskStats.total > 0" class="task-badge-pill pill-total">{{ taskStats.total }}</span>
+                </bk-button>
+
                 <bk-button size="small" theme="primary" :outline="true" @click="openDirBrowser" class="browse-dir-btn" style="margin-right: 8px;">
                     <bk-icon type="folder" style="margin-right: 4px;"></bk-icon> 浏览目录
                 </bk-button>
@@ -184,7 +195,7 @@
                         <bk-table-column width="75" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'album_img', '封面')">
                             <template slot-scope="props">
                                 <div class="table-cover-box" :class="'cover-' + tableSize">
-                                    <img v-if="props.row.has_cover" :src="props.row.cover_url" :key="props.row.cover_url" class="table-cover-img" loading="lazy" @error="props.row.has_cover = false" />
+                                    <img v-if="props.row.has_cover" :src="props.row.cover_url + (cacheBuster ? '&t=' + cacheBuster : '')" :key="props.row.cover_url + (cacheBuster ? '-' + cacheBuster : '')" class="table-cover-img" loading="lazy" @error="props.row.has_cover = false" />
                                     <div v-else class="table-cover-placeholder"></div>
                                 </div>
                             </template>
@@ -900,6 +911,122 @@
                 </div>
             </template>
         </bk-dialog>
+
+        <!-- 5. 任务列表与状态管理弹窗 -->
+        <bk-dialog v-model="taskDrawerVisible"
+            title="任务执行记录与状态监控"
+            :width="1020"
+            :show-footer="false"
+            :header-position="'left'">
+            <div class="task-panel-wrap" v-bkloading="{ isLoading: isTaskLoading }">
+                <!-- 顶部汇总统计卡片 -->
+                <div class="task-stats-cards">
+                    <div class="stat-card" :class="{ 'stat-active': taskFilterState === '' }" @click="filterTaskByState('')">
+                        <div class="stat-num">{{ taskStats.total }}</div>
+                        <div class="stat-label">全部记录</div>
+                    </div>
+                    <div class="stat-card stat-failed" :class="{ 'stat-active': taskFilterState === 'failed' }" @click="filterTaskByState('failed')">
+                        <div class="stat-num">{{ taskStats.failed }}</div>
+                        <div class="stat-label">失败任务</div>
+                    </div>
+                    <div class="stat-card stat-running" :class="{ 'stat-active': taskFilterState === 'running' }" @click="filterTaskByState('running')">
+                        <div class="stat-num">{{ taskStats.running + taskStats.wait }}</div>
+                        <div class="stat-label">进行中 / 排队</div>
+                    </div>
+                    <div class="stat-card stat-success" :class="{ 'stat-active': taskFilterState === 'success' }" @click="filterTaskByState('success')">
+                        <div class="stat-num">{{ taskStats.success }}</div>
+                        <div class="stat-label">已成功</div>
+                    </div>
+                </div>
+
+                <!-- 筛选与操作工具栏 -->
+                <div class="task-panel-toolbar">
+                    <div class="toolbar-left">
+                        <bk-radio-group v-model="taskFilterState" @change="handleTaskFilterChange">
+                            <bk-radio-button value="">全部</bk-radio-button>
+                            <bk-radio-button value="failed">仅看失败</bk-radio-button>
+                            <bk-radio-button value="running">进行中 / 排队</bk-radio-button>
+                            <bk-radio-button value="success">成功</bk-radio-button>
+                        </bk-radio-group>
+                        <bk-select v-model="taskFilterBatch" style="width: 175px; margin-left: 10px;" placeholder="筛选指定批次" :clearable="true" @change="loadTaskRecords(1)">
+                            <bk-option v-for="b in taskStats.batches" :key="b" :id="b" :name="formatBatchTime(b)"></bk-option>
+                        </bk-select>
+                        <bk-input v-model="taskSearchWord" placeholder="搜索歌曲名/文件名" style="width: 180px; margin-left: 10px;" :clearable="true" @enter="loadTaskRecords(1)" @clear="loadTaskRecords(1)"></bk-input>
+                    </div>
+                    <div class="toolbar-right">
+                        <bk-button size="small" theme="primary" :outline="true" @click="loadTaskRecords(1)">
+                            <bk-icon type="refresh"></bk-icon> 刷新
+                        </bk-button>
+                        <bk-button size="small" theme="primary" :outline="true" v-if="taskStats.running + taskStats.wait > 0 && !isBatchSubmitting" @click="handleResumePending" style="margin-left: 6px;">
+                            <bk-icon type="play"></bk-icon> 继续排队任务 ({{ taskStats.running + taskStats.wait }})
+                        </bk-button>
+                        <bk-button size="small" theme="warning" :outline="true" v-if="taskStats.failed > 0" @click="handleRetryAllFailed" style="margin-left: 6px;">
+                            重试失败 ({{ taskStats.failed }})
+                        </bk-button>
+                        <bk-button size="small" theme="danger" :text="true" @click="handleClearTasks" style="margin-left: 6px;">
+                            清空记录
+                        </bk-button>
+                    </div>
+                </div>
+
+                <!-- 任务表格 -->
+                <bk-table :data="taskRecords" size="small" :outer-border="true" max-height="420" style="margin-top: 10px;">
+                    <bk-table-column label="状态" width="95" align="center">
+                        <template slot-scope="props">
+                            <span v-if="props.row.state === 'success'" class="batch-status-badge status-success">成功</span>
+                            <span v-else-if="props.row.state === 'failed'" class="batch-status-badge status-failed">失败</span>
+                            <span v-else-if="props.row.state === 'running'" class="batch-status-badge status-running"><i class="bk-icon icon-circle-2-1 spin-icon"></i> 处理中</span>
+                            <span v-else class="batch-status-badge status-wait">等待中</span>
+                        </template>
+                    </bk-table-column>
+                    <bk-table-column prop="filename" label="歌曲 / 文件名" min-width="180" :show-overflow-tooltip="true">
+                        <template slot-scope="props">
+                            <span :title="props.row.full_path">{{ props.row.filename || props.row.song_name }}</span>
+                        </template>
+                    </bk-table-column>
+                    <bk-table-column label="任务类型" width="100" align="center">
+                        <template slot-scope="props">
+                            <span class="task-type-tag" :class="props.row.tag_source === 'manual_update' ? 'type-manual' : 'type-auto'">
+                                {{ props.row.tag_source === 'manual_update' ? '批量修改' : '自动刮削' }}
+                            </span>
+                        </template>
+                    </bk-table-column>
+                    <bk-table-column prop="batch_time" label="时间" width="150" align="center"></bk-table-column>
+                    <bk-table-column prop="extra" label="执行结果 / 失败详情" min-width="220" :show-overflow-tooltip="true">
+                        <template slot-scope="props">
+                            <span v-if="props.row.state === 'failed'" style="color: #ea3636; font-size: 12px; font-weight: 500;">
+                                <i class="bk-icon icon-close-circle-shape" style="margin-right: 3px;"></i>{{ props.row.extra || '未知错误导致保存失败' }}
+                            </span>
+                            <span v-else-if="props.row.state === 'success'" style="color: #2dcb56; font-size: 12px;">
+                                正常完成
+                            </span>
+                            <span v-else style="color: #979ba5; font-size: 12px;">{{ props.row.extra || '排队中...' }}</span>
+                        </template>
+                    </bk-table-column>
+                    <bk-table-column label="操作" width="80" align="center">
+                        <template slot-scope="props">
+                            <bk-button :text="true" theme="primary" size="small" v-if="props.row.state === 'failed'" @click="handleRetrySingle(props.row)">
+                                重试
+                            </bk-button>
+                            <span v-else style="color: #c4c6cc;">-</span>
+                        </template>
+                    </bk-table-column>
+                </bk-table>
+
+                <!-- 分页 -->
+                <div class="task-pagination-wrap" v-if="taskTotalCount > 0">
+                    <bk-pagination
+                        size="small"
+                        :current.sync="taskCurrentPage"
+                        :count="taskTotalCount"
+                        :limit="taskPageSize"
+                        :limit-list="[10, 20, 50, 100]"
+                        @change="handleTaskPageChange"
+                        @limit-change="handleTaskLimitChange">
+                    </bk-pagination>
+                </div>
+            </div>
+        </bk-dialog>
     </div>
 </template>
 <script>
@@ -1062,6 +1189,26 @@
                 folderMusicTotal: 0,
                 isTableLoading: false,
                 activeRightTab: 'fileList',
+                isForceRefreshing: false,
+                cacheBuster: 0,
+                // 任务列表与监控状态
+                taskDrawerVisible: false,
+                isTaskLoading: false,
+                taskRecords: [],
+                taskTotalCount: 0,
+                taskCurrentPage: 1,
+                taskPageSize: 20,
+                taskFilterState: '',
+                taskFilterBatch: '',
+                taskSearchWord: '',
+                taskStats: {
+                    total: 0,
+                    failed: 0,
+                    success: 0,
+                    running: 0,
+                    wait: 0,
+                    batches: []
+                },
                 // 批量修改与进度跟踪状态
                 batchModalVisible: false,
                 isBatchSubmitting: false,
@@ -1071,6 +1218,8 @@
                 batchStatusMap: {},
                 currentBatchId: '',
                 batchPollTimer: null,
+                taskDrawerTimer: null,
+                sseSource: null,
                 batchReloadImg: true,
                 batchCoverFiles: [],
                 batchSupportedCols: [
@@ -1231,6 +1380,13 @@
             }
         },
         watch: {
+            taskDrawerVisible(val) {
+                if (!val) {
+                    this.stopTaskDrawerAutoRefresh()
+                } else {
+                    this.startTaskDrawerAutoRefresh()
+                }
+            },
             activeRightTab(val) {
                 if (val === 'fileList') {
                     this.$nextTick(() => {
@@ -1264,12 +1420,16 @@
             }
             this.addRecentDir(this.currentDirPath)
             this.handleSearchFile()
+            this.fetchTaskStats()
+            this.initEventSource()
         },
         beforeDestroy() {
             if (this.batchPollTimer) {
                 clearInterval(this.batchPollTimer)
                 this.batchPollTimer = null
             }
+            this.stopTaskDrawerAutoRefresh()
+            this.closeEventSource()
         },
         methods: {
             navigateToPath(path) {
@@ -1281,6 +1441,7 @@
                 this.tablePage = 1
                 this.fileName = ''
                 this.musicInfo = Object.assign({}, this.baseMusicInfo)
+                this.batchStatusMap = {}
                 localStorage.setItem('last_visited_dir', clean)
                 this.addRecentDir(clean)
                 this.fetchFolderMusicList()
@@ -1649,9 +1810,14 @@
             },
             // 保存音乐信息
             handleClick() {
-                console.log(this.musicInfo)
+                const fullPath = this.filePath + '/' + this.fileName
+                const st = (fullPath && this.batchStatusMap[fullPath]) || this.batchStatusMap[this.fileName]
+                if (st && (st.state === 'running' || st.state === 'wait')) {
+                    this.$cwMessage('该歌曲当前正在后台处理或排队中，请等待处理完成后再保存！', 'warning')
+                    return
+                }
                 const params = [{
-                    'file_full_path': this.filePath + '/' + this.fileName,
+                    'file_full_path': fullPath,
                     ...this.musicInfo
                 }]
                 this.isLoading = true
@@ -1662,8 +1828,11 @@
                         this.$store.commit('setHasMsg', true)
                         this.fetchFolderMusicList()
                     } else {
-                        this.$cwMessage('修改失败', 'error')
+                        this.$cwMessage(res.message || '修改失败', 'error')
                     }
+                }).catch((err) => {
+                    this.isLoading = false
+                    this.$cwMessage((err && err.message) || '修改失败', 'error')
                 })
             },
             handleBatch() {
@@ -1704,13 +1873,30 @@
                     ? this.tableSelectedRows.map(r => ({ name: r.filename, icon: 'icon-music' }))
                     : (this.checkedData && this.checkedData.length > 0 ? this.checkedData : [])
                 const isApplyToAll = selectData.length === 0
+                const targetRows = isApplyToAll ? this.folderMusicList : this.tableSelectedRows
+
+                // 提交前校验待处理文件是否有任务正在执行/排队
+                const activeNames = []
+                for (const row of targetRows) {
+                    if (!row || !row.filename) continue
+                    const fullPath = row.path || (this.filePath ? this.filePath + '/' + row.filename : '')
+                    const st = (fullPath && this.batchStatusMap[fullPath]) || this.batchStatusMap[row.filename]
+                    if (st && (st.state === 'running' || st.state === 'wait')) {
+                        activeNames.push(row.filename)
+                    }
+                }
+                if (activeNames.length > 0) {
+                    const sample = activeNames.slice(0, 3).join('、')
+                    const extra = activeNames.length > 3 ? ` 等共 ${activeNames.length} 首` : ''
+                    this.$cwMessage(`检测到有歌曲（${sample}${extra}）正在处理或排队中，请等待当前任务全部执行完毕后再提交！`, 'warning')
+                    return
+                }
 
                 this.$bkInfo({
                     title: '确认要自动批量修改？',
                     confirmLoading: false,
                     confirmFn: () => {
                         this.exampleSetting1.primary.visible = false
-                        const targetRows = isApplyToAll ? this.folderMusicList : this.tableSelectedRows
                         targetRows.forEach(row => {
                             if (row && row.filename) {
                                 this.$set(this.batchStatusMap, row.filename, { state: 'wait', extra: '' })
@@ -1851,7 +2037,8 @@
             },
             getFileStatus(row) {
                 if (!row || !row.filename) return 'none'
-                const item = this.batchStatusMap[row.filename]
+                const fullPath = row.path || (this.filePath ? this.filePath + '/' + row.filename : '')
+                const item = (fullPath && this.batchStatusMap[fullPath]) || this.batchStatusMap[row.filename]
                 if (item && item.state) {
                     return item.state
                 }
@@ -1859,7 +2046,8 @@
             },
             getFileStatusExtra(row) {
                 if (!row || !row.filename) return ''
-                const item = this.batchStatusMap[row.filename]
+                const fullPath = row.path || (this.filePath ? this.filePath + '/' + row.filename : '')
+                const item = (fullPath && this.batchStatusMap[fullPath]) || this.batchStatusMap[row.filename]
                 if (item && item.extra) {
                     return item.extra
                 }
@@ -2086,13 +2274,31 @@
                 const isApplyToAll = this.batchScope === 'all'
                 const selectData = isApplyToAll ? [] : this.tableSelectedRows.map(r => ({ name: r.filename, icon: 'icon-music' }))
                 const targetSongsCount = this.targetSongsCount
+                const targetRows = isApplyToAll ? this.folderMusicList : this.tableSelectedRows
+
+                // 提交前校验待处理文件是否有任务正在执行/排队
+                const activeNames = []
+                for (const row of targetRows) {
+                    if (!row || !row.filename) continue
+                    const fullPath = row.path || (this.filePath ? this.filePath + '/' + row.filename : '')
+                    const st = (fullPath && this.batchStatusMap[fullPath]) || this.batchStatusMap[row.filename]
+                    if (st && (st.state === 'running' || st.state === 'wait')) {
+                        activeNames.push(row.filename)
+                    }
+                }
+                if (activeNames.length > 0) {
+                    const sample = activeNames.slice(0, 3).join('、')
+                    const extra = activeNames.length > 3 ? ` 等共 ${activeNames.length} 首` : ''
+                    this.$cwMessage(`检测到有歌曲（${sample}${extra}）正在处理或排队中，请等待当前任务全部执行完毕后再提交！`, 'warning')
+                    this.isBatchSubmitting = false
+                    return
+                }
 
                 // 立即关闭批量修改弹窗，立刻回到文件列表页面，不阻塞用户操作
                 this.batchModalVisible = false
                 this.isBatchSubmitting = false
 
                 // 将受影响行立即标为 wait (待修改)
-                const targetRows = isApplyToAll ? this.folderMusicList : this.tableSelectedRows
                 targetRows.forEach(row => {
                     if (row && row.filename) {
                         this.$set(this.batchStatusMap, row.filename, { state: 'wait', extra: '' })
@@ -2127,6 +2333,147 @@
                     })
                 })
             },
+            initEventSource() {
+                if (typeof EventSource === 'undefined') {
+                    return
+                }
+                if (this.sseSource) {
+                    try {
+                        this.sseSource.close()
+                    } catch (e) {}
+                }
+                this.sseSource = new EventSource('/api/events/')
+
+                this.sseSource.addEventListener('task_item', (event) => {
+                    try {
+                        const data = JSON.parse(event.data)
+                        this.handleSseTaskItem(data)
+                    } catch (e) {}
+                })
+
+                this.sseSource.addEventListener('task_batch', (event) => {
+                    try {
+                        const data = JSON.parse(event.data)
+                        this.handleSseTaskBatch(data)
+                    } catch (e) {}
+                })
+
+                this.sseSource.onerror = (e) => {
+                    // 原生 EventSource 会自动按 interval 尝试重连
+                }
+            },
+            closeEventSource() {
+                if (this.sseSource) {
+                    try {
+                        this.sseSource.close()
+                    } catch (e) {}
+                    this.sseSource = null
+                }
+            },
+            handleSseTaskItem(data) {
+                if (!data) return
+                const fn = data.filename
+                const fp = data.full_path
+                const state = data.state
+                const extra = data.extra || ''
+                const meta = data.meta
+
+                this.$set(this.batchStatusMap, fn, { state, extra })
+                if (fp) {
+                    this.$set(this.batchStatusMap, fp, { state, extra })
+                }
+
+                // 局部更新列表当前行状态、封面与全部元数据字段，实时更新行数据！
+                const row = this.folderMusicList.find(r => r.filename === fn || (fp && r.path === fp))
+                if (row) {
+                    this.$set(row, 'state', state)
+                    this.$set(row, 'extra', extra)
+                    if (state === 'success') {
+                        this.$set(row, 'has_cover', true)
+                        const freshCover = data.cover_url || `/api/music_cover/?file_path=${encodeURIComponent(data.parent_path || this.filePath)}&file_name=${encodeURIComponent(fn)}&t=${Date.now()}`
+                        this.$set(row, 'cover_url', freshCover)
+
+                        // 实时同步更新其他全部元数据字段，避免仅封面刷新
+                        if (meta) {
+                            if (meta.title !== undefined) this.$set(row, 'title', meta.title)
+                            if (meta.artist !== undefined) this.$set(row, 'artist', meta.artist)
+                            if (meta.album !== undefined) this.$set(row, 'album', meta.album)
+                            if (meta.albumartist !== undefined) this.$set(row, 'albumartist', meta.albumartist)
+                            if (meta.year !== undefined) this.$set(row, 'year', meta.year)
+                            if (meta.genre !== undefined) this.$set(row, 'genre', meta.genre)
+                            if (meta.has_lyrics !== undefined) this.$set(row, 'has_lyrics', meta.has_lyrics)
+                            if (meta.has_cover !== undefined) this.$set(row, 'has_cover', meta.has_cover)
+                            if (meta.filename && meta.filename !== row.filename) {
+                                this.$set(row, 'filename', meta.filename)
+                            }
+                            if (meta.path) {
+                                this.$set(row, 'path', meta.path)
+                            }
+                        }
+                    }
+                }
+
+                // 若右侧编辑抽屉正展开该歌曲，实时更新封面与各字段
+                if (this.fileName === fn && state === 'success') {
+                    this.musicInfo.album_img = `/api/music_cover/?file_path=${encodeURIComponent(this.filePath)}&file_name=${encodeURIComponent(fn)}&t=${Date.now()}`
+                    if (meta) {
+                        if (meta.title !== undefined) this.musicInfo.title = meta.title
+                        if (meta.artist !== undefined) this.musicInfo.artist = meta.artist
+                        if (meta.album !== undefined) this.musicInfo.album = meta.album
+                        if (meta.albumartist !== undefined) this.musicInfo.albumartist = meta.albumartist
+                        if (meta.year !== undefined) this.musicInfo.year = meta.year
+                        if (meta.genre !== undefined) this.musicInfo.genre = meta.genre
+                    }
+                }
+
+                // 若任务监控弹窗打开中，实时更新对应条目状态
+                if (this.taskRecords && this.taskRecords.length > 0) {
+                    const rec = this.taskRecords.find(r => (fp && r.full_path === fp) || r.filename === fn)
+                    if (rec) {
+                        this.$set(rec, 'state', state)
+                        this.$set(rec, 'extra', extra)
+                        if (meta && meta.title) {
+                            this.$set(rec, 'song_name', meta.title)
+                        }
+                        if (meta && meta.artist) {
+                            this.$set(rec, 'artist', meta.artist)
+                        }
+                    }
+                }
+            },
+            handleSseTaskBatch(data) {
+                if (!data) return
+                if (this.taskStats) {
+                    this.taskStats.total = data.total !== undefined ? data.total : this.taskStats.total
+                    this.taskStats.running = Math.max(0, (data.total || 0) - (data.finished || 0))
+                    this.taskStats.wait = 0
+                    this.taskStats.success = data.success !== undefined ? data.success : this.taskStats.success
+                    this.taskStats.failed = data.failed !== undefined ? data.failed : this.taskStats.failed
+                }
+
+                // 若任务监控弹窗打开中，静默刷新当前页
+                if (this.taskDrawerVisible) {
+                    this.loadTaskRecords(this.taskCurrentPage, false)
+                }
+
+                if (data.is_done) {
+                    if (this.batchPollTimer) {
+                        clearInterval(this.batchPollTimer)
+                        this.batchPollTimer = null
+                    }
+                    this.fetchTaskStats()
+                    this.cacheBuster = Date.now()
+                    this.fetchFolderMusicList()
+                    if (data.batch_id === this.currentBatchId) {
+                        this.isBatchSubmitting = false
+                        if (data.failed > 0) {
+                            this.$cwMessage(`批量处理完成：成功 ${data.success} 首，失败 ${data.failed} 首（可点击右上角「任务列表」查看详情）`, 'warning')
+                        } else {
+                            this.$cwMessage(`批量处理已全部完成（共 ${data.total} 首，全部成功）`, 'success')
+                        }
+                    }
+                }
+            },
             startBatchStatusPolling(batchId) {
                 if (!batchId) return
                 this.currentBatchId = batchId
@@ -2143,13 +2490,34 @@
                             const records = pres.data.records || {}
                             for (const fn in records) {
                                 this.$set(this.batchStatusMap, fn, records[fn])
+                                const row = this.folderMusicList.find(r => r.filename === fn)
+                                if (row) {
+                                    this.$set(row, 'state', records[fn].state)
+                                    this.$set(row, 'extra', records[fn].extra)
+                                }
+                            }
+                            if (this.taskStats) {
+                                this.taskStats.total = pres.data.total !== undefined ? pres.data.total : this.taskStats.total
+                                this.taskStats.running = Math.max(0, (pres.data.total || 0) - (pres.data.finished || 0))
+                                this.taskStats.wait = 0
+                                this.taskStats.success = pres.data.success !== undefined ? pres.data.success : this.taskStats.success
+                                this.taskStats.failed = pres.data.failed !== undefined ? pres.data.failed : this.taskStats.failed
+                            }
+                            if (this.taskDrawerVisible) {
+                                this.loadTaskRecords(this.taskCurrentPage, false)
                             }
                             if (pres.data.is_done) {
                                 if (this.batchPollTimer) {
                                     clearInterval(this.batchPollTimer)
                                     this.batchPollTimer = null
                                 }
-                                this.$cwMessage(`批量修改已全部完成（共 ${pres.data.total} 首，成功 ${pres.data.success} 首）`, 'success')
+                                this.cacheBuster = Date.now()
+                                if (pres.data.failed > 0) {
+                                    this.$cwMessage(`批量修改完成：成功 ${pres.data.success} 首，失败 ${pres.data.failed} 首（可点击右上角「任务列表」查看失败原因与详情）`, 'warning')
+                                } else {
+                                    this.$cwMessage(`批量修改已全部完成（共 ${pres.data.total} 首，全部成功）`, 'success')
+                                }
+                                this.fetchTaskStats()
                                 this.fetchFolderMusicList()
                                 if (this.fileName) {
                                     this.loadSongDetail(this.fileName)
@@ -2163,9 +2531,170 @@
                         }
                     })
                 }
-                // 立即执行第一次获取进度，随后每 800ms 轮询一次
-                poll()
-                this.batchPollTimer = setInterval(poll, 800)
+                // 轮询兜底（优先由 SSE 实时推送毫秒级生效）
+                this.batchPollTimer = setInterval(poll, 1500)
+            },
+            handleForceRefreshCache() {
+                this.isForceRefreshing = true
+                this.$api.Task.forceRefreshCache({ file_path: this.filePath }).then(res => {
+                    this.cacheBuster = Date.now()
+                    this.fetchTaskStats()
+                    this.fetchFolderMusicList()
+                    this.$cwMessage('缓存已全部强制清空，已重新读取最新磁盘数据与封面', 'success')
+                }).catch(err => {
+                    this.$cwMessage('强制刷新缓存失败: ' + err, 'error')
+                }).finally(() => {
+                    this.isForceRefreshing = false
+                })
+            },
+            openTaskDrawer() {
+                this.taskDrawerVisible = true
+                this.fetchTaskStats()
+                this.loadTaskRecords(1, true)
+                this.startTaskDrawerAutoRefresh()
+            },
+            startTaskDrawerAutoRefresh() {
+                this.stopTaskDrawerAutoRefresh()
+                this.taskDrawerTimer = setInterval(() => {
+                    if (this.taskDrawerVisible && (this.taskStats.running > 0 || this.isBatchSubmitting)) {
+                        this.fetchTaskStats()
+                        if (!this.isTaskLoading) {
+                            this.loadTaskRecords(this.taskCurrentPage, false)
+                        }
+                    } else if (this.taskStats.running === 0 && !this.isBatchSubmitting) {
+                        this.stopTaskDrawerAutoRefresh()
+                    }
+                }, 1500)
+            },
+            stopTaskDrawerAutoRefresh() {
+                if (this.taskDrawerTimer) {
+                    clearInterval(this.taskDrawerTimer)
+                    this.taskDrawerTimer = null
+                }
+            },
+            fetchTaskStats() {
+                this.$api.Task.getRecordStats().then(res => {
+                    if (res.result && res.data) {
+                        this.taskStats = Object.assign({}, this.taskStats, res.data)
+                    }
+                }).catch(() => {})
+            },
+            loadTaskRecords(page = 1, showLoading = true) {
+                if (showLoading) {
+                    this.isTaskLoading = true
+                }
+                this.taskCurrentPage = page
+                const params = {
+                    page: page,
+                    page_size: this.taskPageSize
+                }
+                if (this.taskFilterState) {
+                    params.state = this.taskFilterState
+                }
+                if (this.taskFilterBatch) {
+                    params.batch = this.taskFilterBatch
+                }
+                if (this.taskSearchWord) {
+                    params.search = this.taskSearchWord
+                }
+                this.$api.Task.getRecord(params).then(res => {
+                    if (res.result && res.data) {
+                        this.taskRecords = res.data.items || []
+                        this.taskTotalCount = res.data.count || 0
+                    }
+                }).catch(err => {
+                    if (showLoading) {
+                        this.$cwMessage('加载任务记录失败: ' + err, 'error')
+                    }
+                }).finally(() => {
+                    this.isTaskLoading = false
+                })
+            },
+            filterTaskByState(state) {
+                this.taskFilterState = state
+                this.loadTaskRecords(1)
+            },
+            handleTaskFilterChange() {
+                this.loadTaskRecords(1)
+            },
+            handleTaskPageChange(page) {
+                this.loadTaskRecords(page)
+            },
+            handleTaskLimitChange(limit) {
+                this.taskPageSize = limit
+                this.loadTaskRecords(1)
+            },
+            handleResumePending() {
+                this.$api.Task.resumePending({ batch: this.taskFilterBatch }).then(res => {
+                    if (res.result) {
+                        this.$cwMessage(`已成功继续执行 ${res.data ? res.data.total : 0} 个排队任务`, 'success')
+                        this.fetchTaskStats()
+                        this.loadTaskRecords(this.taskCurrentPage, false)
+                        if (res.data && res.data.batch) {
+                            this.startBatchStatusPolling(res.data.batch)
+                        }
+                    } else {
+                        this.$cwMessage('继续任务失败: ' + (res.message || ''), 'error')
+                    }
+                }).catch(err => {
+                    this.$cwMessage('继续任务请求异常: ' + err, 'error')
+                })
+            },
+            handleRetryAllFailed() {
+                this.$api.Task.retryFailed({ batch: this.taskFilterBatch }).then(res => {
+                    if (res.result) {
+                        this.$cwMessage(`已重新提交 ${res.data ? res.data.total : 0} 个失败任务`, 'success')
+                        this.fetchTaskStats()
+                        this.loadTaskRecords(1)
+                    } else {
+                        this.$cwMessage('重试失败: ' + (res.message || ''), 'error')
+                    }
+                }).catch(err => {
+                    this.$cwMessage('重试请求出错: ' + err, 'error')
+                })
+            },
+            handleRetrySingle(row) {
+                this.$api.Task.retrySingleRecord({ id: row.id }).then(res => {
+                    if (res.result) {
+                        this.$cwMessage(`任务【${row.filename || row.song_name}】已重新加入执行队列`, 'success')
+                        this.fetchTaskStats()
+                        this.loadTaskRecords(this.taskCurrentPage)
+                    } else {
+                        this.$cwMessage('重试失败: ' + (res.message || ''), 'error')
+                    }
+                }).catch(err => {
+                    this.$cwMessage('重试请求出错: ' + err, 'error')
+                })
+            },
+            handleClearTasks() {
+                this.$bkInfo({
+                    title: '确认清空任务执行记录？',
+                    subTitle: '清空后历史执行记录将无法找回，已完成的音乐标签文件不受影响。',
+                    confirmFn: () => {
+                        this.$api.Task.clearRecord({
+                            batch: this.taskFilterBatch,
+                            state: this.taskFilterState
+                        }).then(res => {
+                            this.$cwMessage(res.message || '任务记录已成功清空', 'success')
+                            this.fetchTaskStats()
+                            this.loadTaskRecords(1)
+                        }).catch(err => {
+                            this.$cwMessage('清空记录失败: ' + err, 'error')
+                        })
+                    }
+                })
+            },
+            formatBatchTime(batchStr) {
+                if (!batchStr) return ''
+                try {
+                    const ts = Number(batchStr)
+                    if (isNaN(ts) || ts <= 0) return batchStr
+                    const d = new Date(ts)
+                    const pad = n => n < 10 ? '0' + n : n
+                    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+                } catch (e) {
+                    return batchStr
+                }
             }
         }
     }
@@ -3166,5 +3695,108 @@ button.bk-button-text {
 .footer-left-info strong {
     color: #3a84ff;
     font-size: 15px;
+}
+
+/* 顶部导航徽章与按钮样式 */
+.task-badge-pill {
+    margin-left: 5px;
+    padding: 0 6px;
+    font-size: 11px;
+    height: 16px;
+    line-height: 16px;
+    border-radius: 8px;
+    display: inline-block;
+    font-weight: 600;
+}
+.task-badge-pill.pill-failed {
+    background: #ea3636;
+    color: #ffffff;
+}
+.task-badge-pill.pill-total {
+    background: #e1ecff;
+    color: #3a84ff;
+}
+.nav-act-btn.force-refresh-btn:hover {
+    background: #fff4e5;
+}
+
+/* 任务列表弹窗内容样式 */
+.task-panel-wrap {
+    padding: 10px 0;
+}
+.task-stats-cards {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.stat-card {
+    flex: 1;
+    background: #f5f7fa;
+    border: 1px solid #dcdee5;
+    border-radius: 6px;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.stat-card:hover {
+    border-color: #3a84ff;
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(58, 132, 255, 0.12);
+}
+.stat-card.stat-active {
+    border-color: #3a84ff;
+    background: #f0f5ff;
+}
+.stat-card .stat-num {
+    font-size: 20px;
+    font-weight: 700;
+    color: #313238;
+}
+.stat-card .stat-label {
+    font-size: 12px;
+    color: #63656e;
+    margin-top: 2px;
+}
+.stat-card.stat-failed .stat-num {
+    color: #ea3636;
+}
+.stat-card.stat-running .stat-num {
+    color: #3a84ff;
+}
+.stat-card.stat-success .stat-num {
+    color: #2dcb56;
+}
+.task-panel-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: #fafbfd;
+    border: 1px solid #dcdee5;
+    border-radius: 4px;
+}
+.task-panel-toolbar .toolbar-left,
+.task-panel-toolbar .toolbar-right {
+    display: flex;
+    align-items: center;
+}
+.task-type-tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+}
+.task-type-tag.type-manual {
+    background: #e1ecff;
+    color: #3a84ff;
+}
+.task-type-tag.type-auto {
+    background: #f2eafd;
+    color: #7c42f0;
+}
+.task-pagination-wrap {
+    margin-top: 12px;
+    display: flex;
+    justify-content: flex-end;
 }
 </style>

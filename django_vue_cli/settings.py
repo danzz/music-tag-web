@@ -143,19 +143,6 @@ STATIC_ROOT = 'static'
 # STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]  # noqa
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-IS_USE_CELERY = False
-
-if IS_USE_CELERY:
-    BROKER_URL = f"redis://{REDIS_HOST}:6379/1"
-    CELERY_TIMEZONE = 'Asia/Shanghai'
-    INSTALLED_APPS += ("django_celery_beat", "django_celery_results")
-    CELERY_ENABLE_UTC = False
-    ENABLE_UTC = False
-    DJANGO_CELERY_BEAT_TZ_AWARE = False
-
-    CELERY_TASK_SERIALIZER = "pickle"
-    CELERY_ACCEPT_CONTENT = ['pickle', ]
-    CELERYBEAT_SCHEDULER = "django_celery_beat.schedulers.DatabaseScheduler"
 
 REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "component.drf.generics.exception_handler",

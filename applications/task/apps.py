@@ -9,9 +9,10 @@ def configure_sqlite_connection(sender, connection, **kwargs):
     if connection.vendor == 'sqlite':
         try:
             with connection.cursor() as cursor:
-                cursor.execute('PRAGMA journal_mode = WAL;')
+                cursor.execute('PRAGMA mmap_size = 0;')
+                cursor.execute('PRAGMA journal_mode = TRUNCATE;')
                 cursor.execute('PRAGMA synchronous = NORMAL;')
-                cursor.execute('PRAGMA busy_timeout = 10000;')
+                cursor.execute('PRAGMA busy_timeout = 15000;')
         except Exception:
             pass
 

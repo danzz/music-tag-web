@@ -1,4 +1,5 @@
 import os.path
+import time
 
 from rest_framework import serializers
 
@@ -89,6 +90,29 @@ class TaskSerializer(serializers.ModelSerializer):
             Task.objects.filter(id=ret["id"]).delete()
             ret["is_exists"] = False
         return ret
+
+
+class TaskRecordSerializer(serializers.ModelSerializer):
+    filename = serializers.SerializerMethodField()
+    batch_time = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TaskRecord
+        fields = "__all__"
+
+    def get_filename(self, obj):
+        if obj.full_path:
+            return os.path.basename(obj.full_path)
+        return obj.song_name
+
+    def get_batch_time(self, obj):
+        if obj.created_at:
+            return obj.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            ts = float(obj.batch) / 1000.0
+            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+        except Exception:
+            return obj.batch
 
 
 class UploadImageSerializer(serializers.Serializer):

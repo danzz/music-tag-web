@@ -20,14 +20,15 @@ class AsyncTaskExecutor:
         return cls._instance
 
     def _init_executor(self):
-        worker_num = getattr(settings, "WORKER_NUM", 8)
+        # 写入磁盘的专用工作线程池（默认固定 4 线程，避免机械硬盘磁头争抢寻道）
+        write_workers = int(getattr(settings, "WRITE_WORKER_NUM", 4))
         self.executor = ThreadPoolExecutor(
-            max_workers=worker_num,
-            thread_name_prefix="music_tag_worker"
+            max_workers=write_workers,
+            thread_name_prefix="music_tag_disk_worker"
         )
         self.batches = {}
         self.status_lock = threading.Lock()
-        logger.info(f"Initialized AsyncTaskExecutor with {worker_num} workers.")
+        logger.info(f"Initialized AsyncTaskExecutor disk write pool with {write_workers} workers.")
 
     def init_batch(self, batch_id, total, task_type="auto_tag"):
         with self.status_lock:

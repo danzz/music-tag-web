@@ -12,6 +12,69 @@ from applications.utils.db_safety import db_write_safe
 from applications.utils.send import send
 
 
+def prepare_artwork_image(raw_input, max_dim=2048, is_thumbnail=False):
+    """
+    规范化图片数据：
+    - 支持 HTTP/HTTPS 远程下载
+    - 支持 Base64 解码 (自动剥离 data:image/*;base64, 前缀)
+    - 使用 Pillow 验证图片完整性，转换颜色通道 (RGBA->PNG, CMYK/其他->RGB JPEG)
+    - 超大图片自动等比压缩尺寸 (避免嵌入超大图导致播放器崩溃或卡顿)
+    - 返回 (clean_img_bytes, format_ext)
+    """
+    if not raw_input:
+        return None, "jpg"
+
+    img_content = None
+    if isinstance(raw_input, str) and raw_input.startswith("http"):
+        try:
+            img_data = send().GET(raw_input)
+            if img_data.status_code == 200:
+                img_content = img_data.content
+            else:
+                raise ValueError(f"下载远程图片失败，HTTP状态码: {img_data.status_code}")
+        except Exception as e:
+            raise ValueError(f"下载网络图片出错: {e}")
+    elif isinstance(raw_input, str):
+        try:
+            raw_b64 = raw_input
+            if "," in raw_b64:
+                raw_b64 = raw_b64.split(",", 1)[1]
+            img_content = base64.b64decode(raw_b64)
+        except Exception as e:
+            raise ValueError(f"Base64图片解码失败: {e}")
+    elif isinstance(raw_input, bytes):
+        img_content = raw_input
+
+    if not img_content:
+        raise ValueError("图片数据为空")
+
+    # 使用 Pillow 验证与规范化格式
+    try:
+        from PIL import Image
+        import io
+        im = Image.open(io.BytesIO(img_content))
+        target_ext = "jpg"
+        target_fmt = "JPEG"
+        if im.mode in ("RGBA", "LA", "P"):
+            target_ext = "png"
+            target_fmt = "PNG"
+        elif im.mode != "RGB":
+            im = im.convert("RGB")
+
+        limit = 500 if is_thumbnail else max_dim
+        if im.width > limit or im.height > limit:
+            im.thumbnail((limit, limit), Image.BICUBIC)
+
+        out_buf = io.BytesIO()
+        if target_fmt == "JPEG":
+            im.save(out_buf, format="JPEG", quality=92)
+        else:
+            im.save(out_buf, format="PNG")
+        return out_buf.getvalue(), target_ext
+    except Exception as e:
+        raise ValueError(f"图片格式无效或损坏: {e}")
+
+
 def apply_field_transform(value, rule):
     """应用文本裁剪与转换规则 (切片、文本替换、正则替换、首尾去空)"""
     if not isinstance(value, str) or not rule:
@@ -57,22 +120,9 @@ def apply_field_transform(value, rule):
     return value
 
 
-@db_write_safe
-def update_manual_task_state_safe(task_id, full_path, state, title, artist, extra=""):
-    full_path = os.path.normpath(full_path)
-    parent_path = os.path.normpath(os.path.dirname(full_path))
-    filename = os.path.basename(full_path)
-    if task_id:
-        from applications.task.models import TaskRecord
-        TaskRecord.objects.filter(id=task_id).update(state=state, extra=extra)
-    Task.objects.update_or_create(full_path=full_path, defaults={
-        "state": state,
-        "parent_path": parent_path,
-        "filename": filename,
-        "song_name": title or filename,
-        "artist_name": artist or "",
-        "extra": extra
-    })
+def update_manual_task_state_safe(task_id, full_path, state, title, artist, extra="", meta=None):
+    from applications.task.services.task_store import task_store
+    task_store.update_item(full_path, state, extra=extra, title=title, artist=artist, task_id=task_id, meta=meta)
 
 
 def process_single_manual_save(each, is_raw_thumbnail=False, **kwargs):
@@ -86,11 +136,23 @@ def process_single_manual_save(each, is_raw_thumbnail=False, **kwargs):
         f = music_tag.load_file(full_path)
         save_music(f, each, is_raw_thumbnail)
         final_path = os.path.normpath(each.get("file_full_path", full_path))
-        update_manual_task_state_safe(task_id, final_path, "success", title, artist, extra="")
-        from applications.task.services.folder_music_service import invalidate_cache
+        from applications.task.services.folder_music_service import invalidate_cache, extract_music_meta
         invalidate_cache(full_path)
         if final_path != full_path:
             invalidate_cache(final_path)
+
+        fn = os.path.basename(final_path)
+        meta = extract_music_meta(final_path, fn, lrc_set=set())
+
+        update_manual_task_state_safe(
+            task_id,
+            final_path,
+            "success",
+            meta.get("title") or title,
+            meta.get("artist") or artist,
+            extra="",
+            meta=meta
+        )
         return True
     except Exception as e:
         update_manual_task_state_safe(task_id, full_path, "failed", title, artist, extra=f"保存失败: {str(e)}")
@@ -192,46 +254,52 @@ def save_music(f, each, is_raw_thumbnail):
         except Exception:
             pass
     elif each.get("album_img", None):
-        try:
-            img_content = None
-            if each["album_img"].startswith("http"):
-                img_data = send().GET(each["album_img"])
-                if img_data.status_code == 200:
-                    img_content = img_data.content
-            else:
-                raw_b64 = each["album_img"]
-                if "," in raw_b64:
-                    raw_b64 = raw_b64.split(",", 1)[1]
-                img_content = base64.b64decode(raw_b64)
-            if img_content:
-                f['artwork'] = img_content
-                if each.get("is_save_album_cover", False):
-                    format_str = getattr(f['artwork'].value, 'format', 'jpg')
-                    album_cover_path = f"{os.path.dirname(each['file_full_path'])}/cover-{f['album']}.{format_str}"
-                    if os.path.exists(album_cover_path):
-                        os.remove(album_cover_path)
+        clean_img_bytes, format_str = prepare_artwork_image(
+            each["album_img"],
+            max_dim=2048,
+            is_thumbnail=is_raw_thumbnail
+        )
+        if clean_img_bytes:
+            # 1. 写入音频文件内嵌标签
+            try:
+                f['artwork'] = clean_img_bytes
+            except Exception as e:
+                raise RuntimeError(f"音频内嵌封面写入失败: {e}")
+
+            # 2. 如果开启了保存专辑封面文件
+            if each.get("is_save_album_cover", False):
+                try:
+                    dir_name = os.path.dirname(each['file_full_path'])
+                    raw_album = str(f.get('album', '') or each.get('album', '') or 'cover')
+                    safe_album = re.sub(r'[\\/*?:"<>|]', '_', raw_album).strip() or "cover"
+                    album_cover_path = os.path.join(dir_name, f"cover-{safe_album}.{format_str}")
                     with open(album_cover_path, "wb") as f_img:
-                        f_img.write(img_content)
-                    std_cover_path = f"{os.path.dirname(each['file_full_path'])}/cover.{format_str}"
-                    try:
-                        with open(std_cover_path, "wb") as f_std:
-                            f_std.write(img_content)
-                    except Exception:
-                        pass
-                if len(img_content) / 1024 / 1024 > 5:
-                    f['artwork'] = f['artwork'].first.raw_thumbnail([2048, 2048])
-                if is_raw_thumbnail:
-                    f['artwork'] = f['artwork'].first.raw_thumbnail([2048, 2048])
-        except Exception as e:
-            print(e)
-            pass
+                        f_img.write(clean_img_bytes)
+
+                    std_cover_path = os.path.join(dir_name, f"cover.{format_str}")
+                    with open(std_cover_path, "wb") as f_std:
+                        f_std.write(clean_img_bytes)
+                except Exception as e:
+                    # 外部目录封面图片保存警告，不阻断音频标签内嵌保存
+                    print(f"写入目录封面文件警告: {e}")
     else:
         if each.get("is_save_album_cover", False):
-            format_str = getattr(f['artwork'].value, 'format', 'jpg')
-            album_cover_path = f"{os.path.dirname(each['file_full_path'])}/cover-{f['album']}.{format_str}"
-            if not os.path.exists(album_cover_path):
-                with open(album_cover_path, "wb") as f_img:
-                    f_img.write(f['artwork'].value.raw)
+            try:
+                artwork_vals = f['artwork'].values
+                if artwork_vals:
+                    art = artwork_vals[0]
+                    raw_data = getattr(art, 'raw', None) or (art if isinstance(art, bytes) else None)
+                    if raw_data:
+                        dir_name = os.path.dirname(each['file_full_path'])
+                        raw_album = str(f.get('album', '') or each.get('album', '') or 'cover')
+                        safe_album = re.sub(r'[\\/*?:"<>|]', '_', raw_album).strip() or "cover"
+                        format_str = getattr(art, 'format', 'jpg') or 'jpg'
+                        album_cover_path = os.path.join(dir_name, f"cover-{safe_album}.{format_str}")
+                        if not os.path.exists(album_cover_path):
+                            with open(album_cover_path, "wb") as f_img:
+                                f_img.write(raw_data)
+            except Exception as e:
+                print(f"导出封面到目录失败: {e}")
     if each.get("album_type", None):
         if isinstance(f.mfile.tags, VCFLACDict):
             f.mfile.tags["RELEASETYPE"] = each["album_type"]
