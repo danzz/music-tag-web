@@ -22,3 +22,5 @@ db.sqlite3
 /build/
 test_environment/
 *.tar.gz
+*.tar
+*.db

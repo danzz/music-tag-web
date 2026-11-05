@@ -104,18 +104,41 @@ def apply_field_transform(value, rule):
         replace_with = rule.get("replace_with", "")
         value = value.replace(replace_search, replace_with)
 
-    # 3. 正则表达式替换
+    # 3. 正则表达式替换或抽取
     regex_search = rule.get("regex_search", "")
     if regex_search:
         regex_replace = rule.get("regex_replace", "")
         try:
-            value = re.sub(regex_search, regex_replace, value)
+            if regex_replace and regex_replace in ("$1", "$2", "$3", r"\1", r"\2", r"\3"):
+                grp_idx = int(regex_replace[-1])
+                m = re.search(regex_search, value)
+                if m and len(m.groups()) >= grp_idx:
+                    value = m.group(grp_idx)
+            else:
+                py_replace = re.sub(r"\$(\d+)", r"\\\1", regex_replace)
+                value = re.sub(regex_search, py_replace, value)
         except Exception:
             pass
 
     # 4. 去除首尾空白
     if rule.get("strip", True):
         value = value.strip()
+
+    # 5. 格式化补零 (pad2: 01, pad3: 001, raw: 1)
+    padding = rule.get("padding")
+    if padding:
+        try:
+            m = re.search(r'\d+', value)
+            if m:
+                num = int(m.group(0))
+                if padding == "pad2":
+                    value = f"{num:02d}"
+                elif padding == "pad3":
+                    value = f"{num:03d}"
+                elif padding == "raw":
+                    value = str(num)
+        except Exception:
+            pass
 
     return value
 
@@ -178,6 +201,17 @@ def save_music(f, each, is_raw_thumbnail):
     file_ext = os.path.basename(f.filename).split(".")[-1]
 
     var_dict = MusicIDS(file=f).var_dict()
+    if not var_dict.get("folder"):
+        full_p = each.get("file_full_path") or getattr(f, "filename", "")
+        if full_p:
+            p_dir = os.path.basename(os.path.dirname(os.path.normpath(str(full_p))))
+            var_dict["folder"] = p_dir
+            var_dict["parent_folder"] = p_dir
+            var_dict["dirname"] = p_dir
+            var_dict["folder_name"] = p_dir
+    seq_idx = each.get("sequence_index", 1)
+    var_dict["seq"] = str(seq_idx)
+    var_dict["sequence_index"] = str(seq_idx)
     transform_rules = each.get("transform_rules", {})
 
     def resolve_val(field_name):
@@ -210,18 +244,42 @@ def save_music(f, each, is_raw_thumbnail):
         f["albumartist"] = res_albumartist
 
     res_discnumber = resolve_val("discnumber")
-    if res_discnumber is not None and res_discnumber != "":
-        try:
-            f["discnumber"] = int(res_discnumber.split("/")[0].strip())
-        except Exception:
-            f["discnumber"] = 0
+    if res_discnumber is not None:
+        if str(res_discnumber).strip() == "":
+            try:
+                f["discnumber"] = 0
+            except Exception:
+                pass
+        else:
+            try:
+                val_clean = str(res_discnumber).split("/")[0].strip()
+                import re
+                m = re.search(r'\d+', val_clean)
+                if m:
+                    f["discnumber"] = val_clean
+                else:
+                    f["discnumber"] = 0
+            except Exception:
+                f["discnumber"] = 0
 
     res_tracknumber = resolve_val("tracknumber")
-    if res_tracknumber is not None and res_tracknumber != "":
-        try:
-            f["tracknumber"] = int(res_tracknumber.split("/")[0].strip())
-        except Exception:
-            f["tracknumber"] = 0
+    if res_tracknumber is not None:
+        if str(res_tracknumber).strip() == "":
+            try:
+                f["tracknumber"] = 0
+            except Exception:
+                pass
+        else:
+            try:
+                val_clean = str(res_tracknumber).split("/")[0].strip()
+                import re
+                m = re.search(r'\d+', val_clean)
+                if m:
+                    f["tracknumber"] = val_clean
+                else:
+                    f["tracknumber"] = 0
+            except Exception:
+                f["tracknumber"] = 0
 
     res_genre = resolve_val("genre")
     if res_genre is not None and res_genre != "":

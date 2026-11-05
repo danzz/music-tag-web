@@ -111,7 +111,7 @@
                             </template>
                             <ul class="bk-dropdown-list" slot="dropdown-content">
                                 <li><a href="javascript:;" @click="exampleSetting1.primary.visible = true"><bk-icon type="magic" style="margin-right: 6px;"></bk-icon>自动匹配修改</a></li>
-                                <li><a href="javascript:;" @click="exampleSetting2.primary.visible = true"><bk-icon type="folder-open" style="margin-right: 6px;"></bk-icon>整理分类文件夹</a></li>
+                                <li><a href="javascript:;" @click="openTidyModal"><bk-icon type="folder-open" style="margin-right: 6px;"></bk-icon>整理分类文件夹</a></li>
                             </ul>
                         </bk-dropdown-menu>
 
@@ -205,6 +205,16 @@
                         <bk-table-column prop="artist" min-width="130" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'artist', '艺术家')"></bk-table-column>
                         <bk-table-column prop="album" min-width="150" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'album', '专辑')"></bk-table-column>
                         <bk-table-column prop="albumartist" min-width="120" :show-overflow-tooltip="true" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'albumartist', '专辑艺术家')"></bk-table-column>
+                        <bk-table-column prop="tracknumber" width="85" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'tracknumber', '音轨号')">
+                            <template slot-scope="props">
+                                <span>{{ props.row.tracknumber && props.row.tracknumber !== '0' ? props.row.tracknumber : '' }}</span>
+                            </template>
+                        </bk-table-column>
+                        <bk-table-column prop="discnumber" width="85" align="center" :render-header="(h, data) => renderHeaderWithBatch(h, data, 'discnumber', '光盘号')">
+                            <template slot-scope="props">
+                                <span>{{ props.row.discnumber && props.row.discnumber !== '0' ? props.row.discnumber : '' }}</span>
+                            </template>
+                        </bk-table-column>
                         <bk-table-column label="歌词" width="70" align="center">
                             <template slot-scope="props">
                                 <span class="pill-badge" :class="{ 'pill-badge-has': props.row.has_lyrics }">
@@ -324,7 +334,7 @@
 
         <!-- 右侧单曲编辑抽屉 -->
         <transition name="drawer-slide">
-            <div class="song-edit-drawer" v-show="Boolean(musicInfo.title)">
+            <div class="song-edit-drawer" v-show="Boolean(fileName)">
                 <div class="drawer-header">
                     <div style="display: flex; align-items: center; overflow: hidden; max-width: 270px;">
                         <span style="font-weight: 600; font-size: 14px; color: #313238; white-space: nowrap;">编辑歌曲标签</span>
@@ -478,14 +488,14 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="edit-item" v-else-if="item === 'discnumber'">
-                            <div class="label1">光盘编号：</div>
+                        <div class="edit-item can-copy" v-else-if="item === 'discnumber'">
+                            <div class="label1" v-bk-tooltips="'变量名:${discnumber}'" v-bk-copy="'${discnumber}'">光盘编号：</div>
                             <div style="width: 70%;">
                                 <bk-input :clearable="true" v-model="musicInfo.discnumber"></bk-input>
                             </div>
                         </div>
-                        <div class="edit-item" v-else-if="item === 'tracknumber'">
-                            <div class="label1">音轨号：</div>
+                        <div class="edit-item can-copy" v-else-if="item === 'tracknumber'">
+                            <div class="label1" v-bk-tooltips="'变量名:${tracknumber}'" v-bk-copy="'${tracknumber}'">音轨号：</div>
                             <div style="width: 70%;">
                                 <bk-input :clearable="true" v-model="musicInfo.tracknumber"></bk-input>
                             </div>
@@ -599,35 +609,88 @@
         </bk-dialog>
         <bk-dialog v-model="exampleSetting2.primary.visible"
             theme="primary"
+            :width="600"
             :mask-close="false"
             @confirm="handleTidy"
             :header-position="exampleSetting2.primary.headerPosition"
-            title="整理文件夹">
-            <p>整理文件夹，按一级目录，二级目录选定的信息分类</p>
-            <div>整理后的根目录</div>
-            <div class="input-demo">
-                <bk-input v-model="tidyFormData.root_path">
-                </bk-input>
+            title="整理分类文件夹 (按标签自动归档)">
+            <div class="tidy-dialog-content">
+                <!-- 1. 范围选择 -->
+                <div class="tidy-form-item">
+                    <div class="tidy-form-label">应用整理范围：</div>
+                    <bk-radio-group v-model="tidyScope">
+                        <bk-radio-button value="all">
+                            当前文件夹全部歌曲 (共 {{ folderMusicTotal }} 首)
+                        </bk-radio-button>
+                        <bk-radio-button value="selected" :disabled="tableSelectedRows.length === 0">
+                            已选中的歌曲 ({{ tableSelectedRows.length }} 首)
+                        </bk-radio-button>
+                    </bk-radio-group>
+                    <div class="tidy-tip" v-if="tidyScope === 'selected'">仅对当前列表中勾选的 {{ tableSelectedRows.length }} 首歌曲进行归档整理</div>
+                    <div class="tidy-tip" v-else>将对当前文件夹内的全部音频文件进行归档整理（共 {{ folderMusicTotal }} 首）</div>
+                </div>
+
+                <!-- 2. 根目录 -->
+                <div class="tidy-form-item" style="margin-top: 14px;">
+                    <div class="tidy-form-label">整理后的根目录 (文件将移动至该目录下的分类子文件夹)：</div>
+                    <bk-input v-model="tidyFormData.root_path" placeholder="/app/media/"></bk-input>
+                </div>
+
+                <!-- 3. 一级与二级目录 -->
+                <div style="display: flex; gap: 16px; margin-top: 14px;">
+                    <div style="flex: 1;">
+                        <div class="tidy-form-label">一级目录分类依据 <span style="color: #ea3636;">*</span>：</div>
+                        <bk-select style="width: 100%;"
+                            :clearable="false"
+                            v-model="tidyFormData.first_dir">
+                            <bk-option v-for="option in tidyList"
+                                :key="option.id"
+                                :id="option.id"
+                                :name="option.name">
+                            </bk-option>
+                        </bk-select>
+                    </div>
+                    <div style="flex: 1;">
+                        <div class="tidy-form-label">二级目录分类依据 (可选)：</div>
+                        <bk-select style="width: 100%;"
+                            :clearable="true"
+                            placeholder="不分二级目录"
+                            v-model="tidyFormData.second_dir">
+                            <bk-option v-for="option in tidyList"
+                                :key="option.id"
+                                :id="option.id"
+                                :name="option.name">
+                            </bk-option>
+                        </bk-select>
+                    </div>
+                </div>
+
+                <!-- 路径预览 -->
+                <div class="tidy-preview-box" style="margin-top: 12px; padding: 8px 12px; background: #f5f7fa; border-radius: 4px; font-size: 12px; color: #63656e; border: 1px dashed #dcdee5;">
+                    <div><span style="font-weight: 500; color: #313238;">归档路径预览：</span><code>{{ tidyPathPreview }}</code></div>
+                </div>
+
+                <!-- 4. 高级选项 -->
+                <div class="tidy-advanced-options" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #f0f1f5;">
+                    <div style="margin-bottom: 8px;">
+                        <bk-checkbox v-model="tidyFormData.move_lrc">
+                            同步移动同名歌词文件 (.lrc)
+                        </bk-checkbox>
+                    </div>
+                    <div style="margin-bottom: 8px; display: flex; align-items: center;">
+                        <span style="font-size: 12px; color: #63656e; margin-right: 12px;">遇到目标文件已存在时：</span>
+                        <bk-radio-group v-model="tidyFormData.conflict_action">
+                            <bk-radio value="skip">跳过 (保留原文件)</bk-radio>
+                            <bk-radio value="overwrite" style="margin-left: 16px;">覆盖目标文件</bk-radio>
+                        </bk-radio-group>
+                    </div>
+                    <div>
+                        <bk-checkbox v-model="tidyFormData.clean_empty_dir">
+                            整理完成后清理变为空的源文件夹
+                        </bk-checkbox>
+                    </div>
+                </div>
             </div>
-            <div>一级目录</div>
-            <bk-select style="width: 250px;"
-                :clearable="false"
-                v-model="tidyFormData.first_dir">
-                <bk-option v-for="option in tidyList"
-                    :key="option.id"
-                    :id="option.id"
-                    :name="option.name">
-                </bk-option>
-            </bk-select>
-            <div>二级目录</div>
-            <bk-select style="width: 250px;"
-                v-model="tidyFormData.second_dir">
-                <bk-option v-for="option in tidyList"
-                    :key="option.id"
-                    :id="option.id"
-                    :name="option.name">
-                </bk-option>
-            </bk-select>
         </bk-dialog>
         <bk-dialog v-model="exampleSetting3.primary.visible"
             theme="primary"
@@ -750,10 +813,23 @@
                             <span class="preset-label">快捷场景预设：</span>
                             <div class="preset-btns">
                                 <template v-if="activeBatchTab === 'title'">
+                                    <bk-button size="small" @click="applyPreset('clean_number_prefix')">去除前置序号与符号</bk-button>
                                     <bk-button size="small" @click="applyPreset('filename_no_ext')">使用文件名(去后缀)</bk-button>
                                     <bk-button size="small" @click="applyPreset('artist_title')">歌手 - 歌名</bk-button>
                                     <bk-button size="small" @click="applyPreset('remove_brackets')">去除括号及备注</bk-button>
                                     <bk-button size="small" @click="applyPreset('underscore_to_space')">下划线转空格</bk-button>
+                                </template>
+                                <template v-else-if="activeBatchTab === 'tracknumber'">
+                                    <bk-button size="small" @click="applyPreset('track_from_filename_prefix')">从文件名前缀提取 (01. / 185 |)</bk-button>
+                                    <bk-button size="small" @click="applyPreset('track_from_multidisc')">提取碟号-曲号 (1-05)</bk-button>
+                                    <bk-button size="small" @click="applyPreset('track_from_word')">提取“第X集/Track X”</bk-button>
+                                    <bk-button size="small" @click="applyPreset('track_sequence')">按表格当前顺序自增 (1, 2, 3...)</bk-button>
+                                </template>
+                                <template v-else-if="activeBatchTab === 'discnumber'">
+                                    <bk-button size="small" @click="applyPreset('disc_fixed_1')">固定碟号 1 (单碟专辑)</bk-button>
+                                    <bk-button size="small" @click="applyPreset('disc_fixed_2')">固定碟号 2</bk-button>
+                                    <bk-button size="small" @click="applyPreset('disc_from_filename_prefix')">从文件名前缀提取 (1-05)</bk-button>
+                                    <bk-button size="small" @click="applyPreset('disc_from_folder')">从目录名提取 (CD1 / Disc 2)</bk-button>
                                 </template>
                                 <template v-else-if="activeBatchTab === 'filename'">
                                     <bk-button size="small" @click="applyPreset('artist_title')">歌手 - 标题</bk-button>
@@ -767,6 +843,7 @@
                                 <template v-else-if="activeBatchTab === 'album'">
                                     <bk-button size="small" @click="applyPreset('from_title')">引用标题</bk-button>
                                     <bk-button size="small" @click="applyPreset('from_filename')">引用文件名(去后缀)</bk-button>
+                                    <bk-button size="small" @click="applyPreset('from_folder')">引用所在目录名</bk-button>
                                 </template>
                                 <template v-else-if="activeBatchTab === 'albumartist'">
                                     <bk-button size="small" @click="applyPreset('from_artist')">引用艺术家</bk-button>
@@ -774,6 +851,33 @@
                                 <template v-else>
                                     <span style="color: #979ba5; font-size: 12px;">可通过下方变量与剪裁自由组合</span>
                                 </template>
+                            </div>
+                        </div>
+
+                        <!-- 专有设置：音轨号格式化与自增 -->
+                        <div v-if="activeBatchTab === 'tracknumber'" style="margin: 8px 0 14px 0;">
+                            <div style="display: flex; align-items: center; gap: 16px; background: #f5f7fa; padding: 8px 12px; border-radius: 4px;">
+                                <span style="font-size: 12px; color: #63656e; font-weight: bold;">格式化补零：</span>
+                                <bk-radio-group v-model="batchConfig.tracknumber.padding">
+                                    <bk-radio value="raw">纯数字 (1, 2, 185)</bk-radio>
+                                    <bk-radio value="pad2">补齐两位 (01, 02)</bk-radio>
+                                    <bk-radio value="pad3">补齐三位 (001, 002)</bk-radio>
+                                    <bk-radio value="keep">保持原样</bk-radio>
+                                </bk-radio-group>
+                            </div>
+                            <div v-if="batchConfig.tracknumber.mode === 'sequence'" style="display: flex; align-items: center; gap: 12px; margin-top: 8px; background: #e1ecff; padding: 8px 12px; border-radius: 4px;">
+                                <span style="font-size: 12px; color: #3a84ff; font-weight: bold;">自增排序起始序号：</span>
+                                <bk-input type="number" :min="1" v-model.number="batchConfig.tracknumber.seq_start" style="width: 80px;"></bk-input>
+                                <span style="font-size: 12px; color: #63656e;">（将按当前表格排列顺序依次为歌曲赋予自增编号）</span>
+                            </div>
+                        </div>
+
+                        <!-- 专有设置：光盘编号固定值 -->
+                        <div v-if="activeBatchTab === 'discnumber' && batchConfig.discnumber.mode === 'fixed'" style="margin: 8px 0 14px 0;">
+                            <div style="display: flex; align-items: center; gap: 12px; background: #f5f7fa; padding: 8px 12px; border-radius: 4px;">
+                                <span style="font-size: 12px; color: #63656e; font-weight: bold;">固定光盘编号：</span>
+                                <bk-input type="number" :min="1" v-model.number="batchConfig.discnumber.fixed_value" style="width: 80px;"></bk-input>
+                                <span style="font-size: 12px; color: #979ba5;">（将所有目标歌曲的光盘编号统一赋为该数值，单碟专辑通常为 1）</span>
                             </div>
                         </div>
 
@@ -791,6 +895,7 @@
                             <div class="var-tags-row">
                                 <span class="var-tag-label">点击插入变量：</span>
                                 <div class="var-tags-list">
+                                    <span class="var-tag-btn" @click="insertVariableTag('${folder}')" title="当前歌曲所在的直接父目录名">+ 所在目录 (${folder})</span>
                                     <span class="var-tag-btn" @click="insertVariableTag('${filename_no_ext}')" title="文件名但去掉后缀名">+ 文件名(无后缀)</span>
                                     <span class="var-tag-btn" @click="insertVariableTag('${filename}')" title="完整文件名">+ 完整文件名</span>
                                     <span class="var-tag-btn" @click="insertVariableTag('${title}')" title="现有标题">+ 标题</span>
@@ -798,6 +903,7 @@
                                     <span class="var-tag-btn" @click="insertVariableTag('${album}')" title="现有专辑">+ 专辑</span>
                                     <span class="var-tag-btn" @click="insertVariableTag('${albumartist}')" title="现有专辑艺术家">+ 专辑艺术家</span>
                                     <span class="var-tag-btn" @click="insertVariableTag('${tracknumber}')" title="音轨号">+ 音轨号</span>
+                                    <span class="var-tag-btn" @click="insertVariableTag('${discnumber}')" title="光盘号">+ 光盘号</span>
                                     <span class="var-tag-btn" @click="insertVariableTag('${year}')" title="年份">+ 年份</span>
                                     <span class="var-tag-btn" @click="insertVariableTag('${genre}')" title="风格">+ 风格</span>
                                 </div>
@@ -879,8 +985,8 @@
                                         <div v-else class="preview-text-cell">
                                             <span class="diff-old" :title="song[col.id] || '(空)'">{{ song[col.id] || '(空)' }}</span>
                                             <span class="diff-arrow">→</span>
-                                            <span class="diff-new" :title="evaluateFieldPreview(song, col.id) || '(空)'">
-                                                {{ evaluateFieldPreview(song, col.id) || '(空)' }}
+                                            <span class="diff-new" :title="evaluateFieldPreview(song, col.id, sIdx) || '(空)'">
+                                                {{ evaluateFieldPreview(song, col.id, sIdx) || '(空)' }}
                                             </span>
                                         </div>
                                     </td>
@@ -986,8 +1092,8 @@
                     </bk-table-column>
                     <bk-table-column label="任务类型" width="100" align="center">
                         <template slot-scope="props">
-                            <span class="task-type-tag" :class="props.row.tag_source === 'manual_update' ? 'type-manual' : 'type-auto'">
-                                {{ props.row.tag_source === 'manual_update' ? '批量修改' : '自动刮削' }}
+                            <span class="task-type-tag" :class="props.row.tag_source === 'manual_update' ? 'type-manual' : (props.row.tag_source === 'tidy_folder' ? 'type-tidy' : 'type-auto')">
+                                {{ props.row.tag_source === 'manual_update' ? '批量修改' : (props.row.tag_source === 'tidy_folder' ? '分类整理' : '自动刮削') }}
                             </span>
                         </template>
                     </bk-table-column>
@@ -1041,7 +1147,32 @@
                     {name: 'X-CSRFToken', value: this.getCookie('django_vue_cli_csrftoken')},
                     {name: 'AUTHORIZATION', value: this.getCookie('AUTHORIZATION')}
                 ],
-                showFields: localStorage.getItem('showFields') ? JSON.parse(localStorage.getItem('showFields')) : ['filename', 'artist', 'album', 'albumartist', 'genre', 'year', 'lyrics', 'comment', 'album_img'],
+                showFields: (() => {
+                    const defaultFields = ['filename', 'artist', 'album', 'albumartist', 'discnumber', 'tracknumber', 'genre', 'year', 'lyrics', 'comment', 'album_img']
+                    try {
+                        const stored = localStorage.getItem('showFields')
+                        if (stored) {
+                            const list = JSON.parse(stored)
+                            if (Array.isArray(list)) {
+                                let changed = false
+                                if (!list.includes('discnumber') || !list.includes('tracknumber')) {
+                                    const idx = list.indexOf('albumartist')
+                                    const insertPos = idx !== -1 ? idx + 1 : list.length
+                                    const toInsert = []
+                                    if (!list.includes('discnumber')) toInsert.push('discnumber')
+                                    if (!list.includes('tracknumber')) toInsert.push('tracknumber')
+                                    list.splice(insertPos, 0, ...toInsert)
+                                    changed = true
+                                }
+                                if (changed) {
+                                    localStorage.setItem('showFields', JSON.stringify(list))
+                                }
+                                return list
+                            }
+                        }
+                    } catch (e) {}
+                    return defaultFields
+                })(),
                 fieldList: [
                     {id: 'filename', name: '文件名'},
                     {id: 'artist', name: '艺术家'},
@@ -1157,10 +1288,14 @@
                 checkedData: [],
                 selectAutoMode: 'hard',
                 sourceList: [],
+                tidyScope: 'all',
                 tidyFormData: {
                     root_path: '/app/media/',
                     first_dir: 'artist',
-                    second_dir: ''
+                    second_dir: '',
+                    move_lrc: true,
+                    conflict_action: 'skip',
+                    clean_empty_dir: false
                 },
                 exampleSetting1: {
                     primary: {
@@ -1182,7 +1317,7 @@
                 },
                 sortedField: localStorage.getItem('sortedField') ? JSON.parse(localStorage.getItem('sortedField')) : [],
                 tableSize: localStorage.getItem('tableSize') || 'medium',
-                tablePageSize: localStorage.getItem('tablePageSize') ? Number(localStorage.getItem('tablePageSize')) : 128,
+                tablePageSize: localStorage.getItem('tablePageSize') ? Number(localStorage.getItem('tablePageSize')) : 32,
                 pageSizeList: [32, 64, 128, 256, 512, 1000],
                 tablePage: 1,
                 folderMusicList: [],
@@ -1229,6 +1364,8 @@
                     { id: 'artist', name: '艺术家' },
                     { id: 'album', name: '专辑' },
                     { id: 'albumartist', name: '专辑艺术家' },
+                    { id: 'tracknumber', name: '音轨号' },
+                    { id: 'discnumber', name: '光盘编号' },
                     { id: 'year', name: '年份' },
                     { id: 'genre', name: '风格' }
                 ],
@@ -1239,6 +1376,8 @@
                     artist: false,
                     album: false,
                     albumartist: false,
+                    tracknumber: false,
+                    discnumber: false,
                     year: false,
                     genre: false
                 },
@@ -1297,6 +1436,32 @@
                         replace_with: '',
                         regex_search: '',
                         regex_replace: '',
+                        strip: true
+                    },
+                    tracknumber: {
+                        mode: 'extract_filename',
+                        template: '${filename_no_ext}',
+                        regex_search: '^(\\d+)',
+                        regex_replace: '$1',
+                        padding: 'raw',
+                        seq_start: 1,
+                        trim_start: 0,
+                        trim_end: 0,
+                        replace_search: '',
+                        replace_with: '',
+                        strip: true
+                    },
+                    discnumber: {
+                        mode: 'fixed',
+                        fixed_value: 1,
+                        template: '1',
+                        regex_search: '^(?:CD)?(\\d+)[-_.]\\d+',
+                        regex_replace: '$1',
+                        padding: 'raw',
+                        trim_start: 0,
+                        trim_end: 0,
+                        replace_search: '',
+                        replace_with: '',
                         strip: true
                     },
                     year: {
@@ -1362,6 +1527,17 @@
                 if (this.sortedField.includes('update_time')) return '修改时间'
                 if (this.sortedField.includes('size')) return '文件大小'
                 return '排序'
+            },
+            tidyPathPreview() {
+                const root = (this.tidyFormData.root_path || '/app/media/').replace(/\/+$/, '')
+                const firstOpt = this.tidyList.find(o => o.id === this.tidyFormData.first_dir)
+                const firstName = firstOpt ? `[${firstOpt.name}]` : '[一级分类]'
+                let secondPart = ''
+                if (this.tidyFormData.second_dir) {
+                    const secondOpt = this.tidyList.find(o => o.id === this.tidyFormData.second_dir)
+                    secondPart = `/${secondOpt ? `[${secondOpt.name}]` : '[二级分类]'}`
+                }
+                return `${root}/${firstName}${secondPart}/歌曲文件名.mp3`
             },
             filePath: {
                 get() {
@@ -1596,6 +1772,10 @@
                     if (node.children && node.children.length > 0) {
                         return
                     }
+                    if (this.fileName === node.name) {
+                        this.closeEditSection()
+                        return
+                    }
                     this.loadSongDetail(node.name)
                 }
             },
@@ -1649,6 +1829,10 @@
                 return (row.filename === this.fileName) ? 'active-table-row' : ''
             },
             handleTableRowClick(row) {
+                if (this.fileName === row.filename) {
+                    this.closeEditSection()
+                    return
+                }
                 this.loadSongDetail(row.filename)
             },
             fetchFolderMusicList() {
@@ -1934,30 +2118,102 @@
                     }
                 })
             },
+            openTidyModal() {
+                if (!this.filePath) {
+                    this.$cwMessage('请先在左侧选择一个文件夹', 'warning')
+                    return
+                }
+                this.tidyScope = 'all'
+                if (!this.tidyFormData.root_path) {
+                    this.tidyFormData.root_path = '/app/media/'
+                }
+                this.exampleSetting2.primary.visible = true
+            },
             handleTidy() {
+                const isApplyToAll = this.tidyScope === 'all'
+                const targetRows = isApplyToAll ? this.folderMusicList : this.tableSelectedRows
+                const targetCount = isApplyToAll ? this.folderMusicTotal : this.tableSelectedRows.length
+
+                if (targetCount === 0) {
+                    this.$cwMessage('当前没有待整理的歌曲', 'warning')
+                    return
+                }
+
+                // 提交前校验待处理文件是否有任务正在执行/排队
+                const activeNames = []
+                for (const row of targetRows) {
+                    if (!row || !row.filename) continue
+                    const fullPath = row.path || (this.filePath ? this.filePath + '/' + row.filename : '')
+                    const st = (fullPath && this.batchStatusMap[fullPath]) || this.batchStatusMap[row.filename]
+                    if (st && (st.state === 'running' || st.state === 'wait')) {
+                        activeNames.push(row.filename)
+                    }
+                }
+                if (activeNames.length > 0) {
+                    const sample = activeNames.slice(0, 3).join('、')
+                    const extra = activeNames.length > 3 ? ` 等共 ${activeNames.length} 首` : ''
+                    this.$cwMessage(`检测到有歌曲（${sample}${extra}）正在处理或排队中，请等待当前任务全部执行完毕后再提交！`, 'warning')
+                    return
+                }
+
+                const firstOpt = this.tidyList.find(o => o.id === this.tidyFormData.first_dir)
+                const secondOpt = this.tidyFormData.second_dir ? this.tidyList.find(o => o.id === this.tidyFormData.second_dir) : null
+                const ruleDesc = `一级【${firstOpt ? firstOpt.name : this.tidyFormData.first_dir}】` + (secondOpt ? `、二级【${secondOpt.name}】` : '')
+
                 this.$bkInfo({
-                    title: '确认要整理文件夹？',
-                    confirmLoading: true,
+                    title: `确认要整理分类文件夹（共 ${targetCount} 首）？`,
+                    subTitle: `将按${ruleDesc}归档至目录：${this.tidyFormData.root_path}`,
+                    confirmLoading: false,
                     confirmFn: () => {
-                        try {
-                            this.isLoading = true
-                            this.tidyFormData['file_full_path'] = this.filePath
-                            this.tidyFormData['select_data'] = this.checkedData
-                            this.$api.Task.tidyFolder(this.tidyFormData).then((res) => {
-                                this.isLoading = false
-                                console.log(res)
-                                if (res.result) {
-                                    this.$cwMessage('创建成功', 'success')
-                                    this.handleSearchFile()
-                                } else {
-                                    this.$cwMessage('创建失败', 'error')
+                        this.exampleSetting2.primary.visible = false
+
+                        // 将受影响行立即标为 wait (待整理)
+                        targetRows.forEach(row => {
+                            if (row && row.filename) {
+                                this.$set(this.batchStatusMap, row.filename, { state: 'wait', extra: '' })
+                            }
+                        })
+                        this.$cwMessage(`整理分类任务已提交（共 ${targetCount} 首），正在后台处理中...`, 'primary')
+
+                        const payload = {
+                            root_path: this.tidyFormData.root_path || '/app/media/',
+                            first_dir: this.tidyFormData.first_dir || 'artist',
+                            second_dir: this.tidyFormData.second_dir || '',
+                            file_full_path: this.filePath,
+                            apply_to_all: isApplyToAll,
+                            select_data: isApplyToAll ? [] : this.tableSelectedRows.map(r => ({
+                                name: r.filename,
+                                filename: r.filename,
+                                path: r.path,
+                                artist: r.artist
+                            })),
+                            move_lrc: this.tidyFormData.move_lrc !== false,
+                            conflict_action: this.tidyFormData.conflict_action || 'skip',
+                            clean_empty_dir: Boolean(this.tidyFormData.clean_empty_dir)
+                        }
+
+                        this.$api.Task.tidyFolder(payload).then((res) => {
+                            if (res.result) {
+                                const batchId = res.data ? res.data.batch : ''
+                                this.startBatchStatusPolling(batchId)
+                                this.$store.commit('setHasMsg', true)
+                            } else {
+                                this.$cwMessage('提交整理失败: ' + (res.message || ''), 'error')
+                                targetRows.forEach(row => {
+                                    if (row && row.filename) {
+                                        this.$delete(this.batchStatusMap, row.filename)
+                                    }
+                                })
+                            }
+                        }).catch((err) => {
+                            this.$cwMessage('整理任务提交异常: ' + err, 'error')
+                            targetRows.forEach(row => {
+                                if (row && row.filename) {
+                                    this.$delete(this.batchStatusMap, row.filename)
                                 }
                             })
-                            return true
-                        } catch (e) {
-                            console.warn(e)
-                            return false
-                        }
+                        })
+                        return true
                     }
                 })
             },
@@ -2084,7 +2340,16 @@
                 if (!cfg) return
 
                 if (f === 'title') {
-                    if (presetKey === 'filename_no_ext') {
+                    if (presetKey === 'clean_number_prefix') {
+                        cfg.template = '${filename_no_ext}'
+                        cfg.trim_start = 0
+                        cfg.trim_end = 0
+                        cfg.replace_search = ''
+                        cfg.replace_with = ''
+                        cfg.regex_search = '^\\d+[-_\\s|.]+ ?'
+                        cfg.regex_replace = ''
+                        cfg.strip = true
+                    } else if (presetKey === 'filename_no_ext') {
                         cfg.template = '${filename_no_ext}'
                         cfg.trim_start = 0
                         cfg.trim_end = 0
@@ -2101,6 +2366,66 @@
                     } else if (presetKey === 'underscore_to_space') {
                         cfg.replace_search = '_'
                         cfg.replace_with = ' '
+                    }
+                } else if (f === 'tracknumber') {
+                    if (presetKey === 'track_from_filename_prefix') {
+                        cfg.mode = 'extract_filename'
+                        cfg.template = '${filename_no_ext}'
+                        cfg.regex_search = '^(\\d+)'
+                        cfg.regex_replace = '$1'
+                        cfg.trim_start = 0
+                        cfg.trim_end = 0
+                        cfg.replace_search = ''
+                        cfg.replace_with = ''
+                        cfg.strip = true
+                    } else if (presetKey === 'track_from_multidisc') {
+                        cfg.mode = 'extract_multidisc'
+                        cfg.template = '${filename_no_ext}'
+                        cfg.regex_search = '^(?:CD)?(\\d+)[-_.](\\d+)'
+                        cfg.regex_replace = '$2'
+                        cfg.trim_start = 0
+                        cfg.trim_end = 0
+                        cfg.replace_search = ''
+                        cfg.replace_with = ''
+                        cfg.strip = true
+                        // 联动开启光盘编号并配置抽取第1组
+                        this.batchFieldsEnabled.discnumber = true
+                        this.batchConfig.discnumber.mode = 'extract_filename'
+                        this.batchConfig.discnumber.template = '${filename_no_ext}'
+                        this.batchConfig.discnumber.regex_search = '^(?:CD)?(\\d+)[-_.]\\d+'
+                        this.batchConfig.discnumber.regex_replace = '$1'
+                        this.$cwMessage('已自动联动启用【光盘编号】，将同时抽取前置碟号', 'primary')
+                    } else if (presetKey === 'track_from_word') {
+                        cfg.mode = 'extract_word'
+                        cfg.template = '${filename_no_ext}'
+                        cfg.regex_search = '(?:Track|第)\\s*(\\d+)'
+                        cfg.regex_replace = '$1'
+                        cfg.trim_start = 0
+                        cfg.trim_end = 0
+                        cfg.replace_search = ''
+                        cfg.replace_with = ''
+                        cfg.strip = true
+                    } else if (presetKey === 'track_sequence') {
+                        cfg.mode = 'sequence'
+                        cfg.seq_start = 1
+                    }
+                } else if (f === 'discnumber') {
+                    if (presetKey === 'disc_fixed_1') {
+                        cfg.mode = 'fixed'
+                        cfg.fixed_value = 1
+                    } else if (presetKey === 'disc_fixed_2') {
+                        cfg.mode = 'fixed'
+                        cfg.fixed_value = 2
+                    } else if (presetKey === 'disc_from_filename_prefix') {
+                        cfg.mode = 'extract_filename'
+                        cfg.template = '${filename_no_ext}'
+                        cfg.regex_search = '^(?:CD)?(\\d+)[-_.]\\d+'
+                        cfg.regex_replace = '$1'
+                    } else if (presetKey === 'disc_from_folder') {
+                        cfg.mode = 'extract_folder'
+                        cfg.template = '${parent_folder}'
+                        cfg.regex_search = '(?:CD|Disc|碟)?\\s*(\\d+)'
+                        cfg.regex_replace = '$1'
                     }
                 } else if (f === 'filename') {
                     if (presetKey === 'artist_title') {
@@ -2123,6 +2448,8 @@
                         cfg.template = '${title}'
                     } else if (presetKey === 'from_filename') {
                         cfg.template = '${filename_no_ext}'
+                    } else if (presetKey === 'from_folder') {
+                        cfg.template = '${folder}'
                     }
                 } else if (f === 'albumartist') {
                     if (presetKey === 'from_artist') {
@@ -2172,26 +2499,59 @@
                     })
                 }
             },
-            evaluateFieldPreview(song, fieldName) {
+            formatNumberPadding(numStr, padding) {
+                if (!numStr) return ''
+                const m = String(numStr).match(/\d+/)
+                if (!m) return numStr
+                const num = parseInt(m[0], 10)
+                if (isNaN(num)) return numStr
+                if (padding === 'pad2') {
+                    return String(num).padStart(2, '0')
+                } else if (padding === 'pad3') {
+                    return String(num).padStart(3, '0')
+                } else if (padding === 'raw') {
+                    return String(num)
+                }
+                return numStr
+            },
+            evaluateFieldPreview(song, fieldName, songIndex = 0) {
                 if (!song) return ''
                 if (fieldName === 'album_img') return ''
                 const config = this.batchConfig[fieldName]
                 if (!config) return song[fieldName] || ''
 
+                // 专有逻辑：音轨号自增模式
+                if (fieldName === 'tracknumber' && config.mode === 'sequence') {
+                    const start = Number(config.seq_start) || 1
+                    const seqNum = start + songIndex
+                    return this.formatNumberPadding(String(seqNum), config.padding)
+                }
+
+                // 专有逻辑：光盘编号固定值
+                if (fieldName === 'discnumber' && config.mode === 'fixed') {
+                    return String(config.fixed_value || 1)
+                }
+
                 const filename = song.filename || ''
                 const extMatch = filename.lastIndexOf('.')
                 const filenameNoExt = extMatch !== -1 ? filename.substring(0, extMatch) : filename
                 const ext = extMatch !== -1 ? filename.substring(extMatch + 1) : ''
+                const parentFolder = (song.path ? song.path.split('/').filter(Boolean).slice(-2, -1)[0] : '') || (this.filePath ? this.filePath.split('/').filter(Boolean).pop() : '') || ''
 
                 const varDict = {
                     filename: filename,
                     filename_no_ext: filenameNoExt,
                     basename: filenameNoExt,
+                    folder: parentFolder,
+                    parent_folder: parentFolder,
+                    dirname: parentFolder,
+                    folder_name: parentFolder,
                     title: song.title || '',
                     artist: song.artist || '',
                     album: song.album || '',
                     albumartist: song.albumartist || '',
                     tracknumber: song.tracknumber || '',
+                    discnumber: song.discnumber || '',
                     year: song.year || '',
                     genre: song.genre || ''
                 }
@@ -2217,8 +2577,16 @@
 
                 if (config.regex_search) {
                     try {
-                        const re = new RegExp(config.regex_search, 'g')
-                        val = val.replace(re, config.regex_replace || '')
+                        const repl = config.regex_replace || ''
+                        if (repl === '$1' || repl === '$2' || repl === '$3') {
+                            const grpIdx = parseInt(repl.substring(1), 10)
+                            const m = val.match(new RegExp(config.regex_search))
+                            if (m && m[grpIdx] !== undefined) {
+                                val = m[grpIdx]
+                            }
+                        } else {
+                            val = val.replace(new RegExp(config.regex_search, 'g'), repl)
+                        }
                     } catch (e) {
                         // ignore regex pattern error during live typing
                     }
@@ -2226,6 +2594,10 @@
 
                 if (config.strip) {
                     val = val.trim()
+                }
+
+                if (fieldName === 'tracknumber' || fieldName === 'discnumber') {
+                    val = this.formatNumberPadding(val, config.padding)
                 }
 
                 if (fieldName === 'filename' && ext) {
@@ -2255,26 +2627,53 @@
                     musicInfo.is_save_album_cover = this.batchConfig.album_img.is_save_album_cover
                 }
 
-                const textFields = ['filename', 'title', 'artist', 'album', 'albumartist', 'year', 'genre']
+                const textFields = ['filename', 'title', 'artist', 'album', 'albumartist', 'year', 'genre', 'tracknumber', 'discnumber']
                 for (const f of textFields) {
                     if (this.batchFieldsEnabled[f]) {
-                        musicInfo[f] = this.batchConfig[f].template
-                        musicInfo.transform_rules[f] = {
-                            trim_start: this.batchConfig[f].trim_start,
-                            trim_end: this.batchConfig[f].trim_end,
-                            replace_search: this.batchConfig[f].replace_search,
-                            replace_with: this.batchConfig[f].replace_with,
-                            regex_search: this.batchConfig[f].regex_search,
-                            regex_replace: this.batchConfig[f].regex_replace,
-                            strip: this.batchConfig[f].strip
+                        if (f === 'discnumber' && this.batchConfig.discnumber.mode === 'fixed') {
+                            musicInfo.discnumber = String(this.batchConfig.discnumber.fixed_value || 1)
+                        } else if (f === 'tracknumber' && this.batchConfig.tracknumber.mode === 'sequence') {
+                            musicInfo.tracknumber = '${sequence_index}'
+                            musicInfo.transform_rules.tracknumber = {
+                                padding: this.batchConfig.tracknumber.padding
+                            }
+                        } else {
+                            musicInfo[f] = this.batchConfig[f].template
+                            musicInfo.transform_rules[f] = {
+                                trim_start: this.batchConfig[f].trim_start,
+                                trim_end: this.batchConfig[f].trim_end,
+                                replace_search: this.batchConfig[f].replace_search,
+                                replace_with: this.batchConfig[f].replace_with,
+                                regex_search: this.batchConfig[f].regex_search,
+                                regex_replace: this.batchConfig[f].regex_replace,
+                                strip: this.batchConfig[f].strip,
+                                padding: this.batchConfig[f].padding
+                            }
                         }
                     }
                 }
 
                 const isApplyToAll = this.batchScope === 'all'
-                const selectData = isApplyToAll ? [] : this.tableSelectedRows.map(r => ({ name: r.filename, icon: 'icon-music' }))
-                const targetSongsCount = this.targetSongsCount
                 const targetRows = isApplyToAll ? this.folderMusicList : this.tableSelectedRows
+                const targetSongsCount = this.targetSongsCount
+
+                const isTrackSequence = this.batchFieldsEnabled.tracknumber && this.batchConfig.tracknumber.mode === 'sequence'
+                const isDiscFixed = this.batchFieldsEnabled.discnumber && this.batchConfig.discnumber.mode === 'fixed'
+
+                const selectData = targetRows.map((r, idx) => {
+                    const itemData = {
+                        name: r.filename,
+                        icon: 'icon-music',
+                        sequence_index: idx + (Number(this.batchConfig.tracknumber.seq_start) || 1)
+                    }
+                    if (this.batchFieldsEnabled.tracknumber) {
+                        itemData.tracknumber = this.evaluateFieldPreview(r, 'tracknumber', idx)
+                    }
+                    if (this.batchFieldsEnabled.discnumber) {
+                        itemData.discnumber = isDiscFixed ? String(this.batchConfig.discnumber.fixed_value || 1) : this.evaluateFieldPreview(r, 'discnumber', idx)
+                    }
+                    return itemData
+                })
 
                 // 提交前校验待处理文件是否有任务正在执行/排队
                 const activeNames = []
@@ -2310,7 +2709,7 @@
                 this.$api.Task.batchUpdateId3({
                     file_full_path: this.filePath,
                     select_data: selectData,
-                    apply_to_all: isApplyToAll,
+                    apply_to_all: isApplyToAll && !isTrackSequence,
                     music_info: musicInfo
                 }).then((res) => {
                     if (res.result) {
@@ -3793,6 +4192,24 @@ button.bk-button-text {
 .task-type-tag.type-auto {
     background: #f2eafd;
     color: #7c42f0;
+}
+.task-type-tag.type-tidy {
+    background: #e5f6ea;
+    color: #2dcb56;
+}
+.tidy-dialog-content {
+    padding: 6px 4px 10px 4px;
+}
+.tidy-form-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #313238;
+    margin-bottom: 6px;
+}
+.tidy-tip {
+    font-size: 12px;
+    color: #979ba5;
+    margin-top: 4px;
 }
 .task-pagination-wrap {
     margin-top: 12px;

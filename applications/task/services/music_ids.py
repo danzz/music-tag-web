@@ -24,111 +24,190 @@ class MusicIDS:
 
     @property
     def album_name(self):
-        album_name = self.file["album"].value
-        album_name = album_name.replace(" ", "")
-        if not album_name:
-            album_name = "未知专辑"
-        return self.file["album"].value
+        try:
+            album_name = str(self.file["album"].value or "").strip()
+            if not album_name:
+                return "未知专辑"
+            return album_name
+        except Exception:
+            return "未知专辑"
 
     @property
     def album(self):
-        album_name = self.file["album"].value
-        album_name = album_name.replace(" ", "")
-        if not album_name:
+        try:
+            album_name = str(self.file["album"].value or "").strip()
+            return album_name
+        except Exception:
             return ""
-        return self.file["album"].value
 
     @property
     def album_type(self):
         try:
             if isinstance(self.file.mfile.tags, VCFLACDict):
-                return self.file.mfile.tags.get("RELEASETYPE")[0]
+                tags = self.file.mfile.tags.get("RELEASETYPE", [""])
+                return str(tags[0]) if tags else ""
             elif isinstance(self.file.mfile.tags, ID3):
-                return self.file.mfile.tags.get("TXXX:MusicBrainz Album Type").text[0]
-            else:
-                return ""
+                tag = self.file.mfile.tags.get("TXXX:MusicBrainz Album Type")
+                if tag and getattr(tag, "text", None):
+                    return str(tag.text[0])
+            return ""
         except Exception:
             return ""
 
     @property
     def album_artist(self):
-        return self.file["albumartist"].value
+        try:
+            val = self.file["albumartist"].value
+            return str(val).strip() if val else ""
+        except Exception:
+            return ""
+
+    @property
+    def albumartist(self):
+        return self.album_artist
 
     @property
     def artist_name(self):
-        return self.file["artist"].value
+        return self.artist
 
     @property
     def artist(self):
-        return self.file["artist"].value
+        try:
+            val = self.file["artist"].value
+            return str(val).strip() if val else ""
+        except Exception:
+            return ""
 
     @property
     def year(self):
         try:
             year = self.file["year"].value
+            if year:
+                year_list = str(year).split("-")
+                if year_list and year_list[0]:
+                    import re
+                    m = re.search(r'\d+', year_list[0])
+                    if m:
+                        return int(m.group(0))
         except Exception:
-            return 0
-        try:
-            year = int(year)
-        except Exception:
-            year_list = year.split("-")
-            if year_list and year_list[0]:
-                try:
-                    return int(year_list[0].replace(" ", ""))
-                except Exception:
-                    return 0
-        return year
+            pass
+        return 0
 
     @property
     def genre(self):
-        genre = self.file["genre"].value
-        if genre:
-            genre = genre.upper()
-        else:
-            genre = "未知"
-        return genre
+        try:
+            genre = self.file["genre"].value
+            if genre:
+                return str(genre).strip().upper()
+        except Exception:
+            pass
+        return "未知"
 
     @property
     def comment(self):
-        return self.file["comment"].value
+        try:
+            val = self.file["comment"].value
+            return str(val).strip() if val else ""
+        except Exception:
+            return ""
 
     @property
     def lyrics(self):
-        return self.file["lyrics"].value
+        try:
+            val = self.file["lyrics"].value
+            return str(val).strip() if val else ""
+        except Exception:
+            return ""
 
     @property
     def duration(self):
-        return round(self.file['#length'].value, 2)
+        try:
+            return round(self.file['#length'].value, 2)
+        except Exception:
+            return 0.0
 
     @property
     def size(self):
-        return round(os.path.getsize(self.path) / 1024 / 1024, 2)
+        try:
+            return round(os.path.getsize(self.path) / 1024 / 1024, 2)
+        except Exception:
+            return 0.0
 
     @property
     def suffix(self):
-        return self.file['#codec'].value
+        try:
+            return str(self.file['#codec'].value)
+        except Exception:
+            return os.path.splitext(self.path)[-1].lstrip('.').lower()
 
     @property
     def bit_rate(self):
-        return int(self.file['#bitrate'].value / 1000)
+        try:
+            return int(self.file['#bitrate'].value / 1000)
+        except Exception:
+            return 0
 
     @property
     def track_number(self):
         try:
-            return self.file['tracknumber'].value
+            val = self.file['tracknumber'].value
+            if val is not None and str(val).strip():
+                return str(val).strip()
         except Exception:
-            return self.file.mfile.tags["tracknumber"][0]
+            pass
+        try:
+            if hasattr(self.file, "mfile") and self.file.mfile and getattr(self.file.mfile, "tags", None):
+                tags = self.file.mfile.tags
+                if "TRCK" in tags:
+                    val = str(tags["TRCK"][0]).split("/")[0].strip()
+                    if val:
+                        return val
+                if "tracknumber" in tags:
+                    val = str(tags["tracknumber"][0]).split("/")[0].strip()
+                    if val:
+                        return val
+        except Exception:
+            pass
+        return "0"
+
+    @property
+    def tracknumber(self):
+        return self.track_number
 
     @property
     def disc_number(self):
         try:
-            return self.file['discnumber'].value
+            val = self.file['discnumber'].value
+            if val is not None and str(val).strip():
+                return str(val).strip()
         except Exception:
-            return self.file.mfile.tags["discnumber"][0]
+            pass
+        try:
+            if hasattr(self.file, "mfile") and self.file.mfile and getattr(self.file.mfile, "tags", None):
+                tags = self.file.mfile.tags
+                if "TPOS" in tags:
+                    val = str(tags["TPOS"][0]).split("/")[0].strip()
+                    if val:
+                        return val
+                if "discnumber" in tags:
+                    val = str(tags["discnumber"][0]).split("/")[0].strip()
+                    if val:
+                        return val
+        except Exception:
+            pass
+        return "0"
+
+    @property
+    def discnumber(self):
+        return self.disc_number
 
     @property
     def title(self):
-        return self.file['title'].value
+        try:
+            val = self.file['title'].value
+            return str(val).strip() if val else ""
+        except Exception:
+            return ""
 
     @property
     def artwork(self):
@@ -202,6 +281,9 @@ class MusicIDS:
 
     def var_dict(self):
         filename_no_ext = os.path.splitext(self.file_name)[0]
+        parent_dir = ""
+        if self.path:
+            parent_dir = os.path.basename(os.path.dirname(os.path.normpath(self.path)))
         return {
             "title": self.title or filename_no_ext,
             "artist": self.artist,
@@ -212,6 +294,10 @@ class MusicIDS:
             "filename": self.file_name,
             "filename_no_ext": filename_no_ext,
             "basename": filename_no_ext,
+            "folder": parent_dir,
+            "parent_folder": parent_dir,
+            "dirname": parent_dir,
+            "folder_name": parent_dir,
             "year": self.year,
             "genre": self.genre,
         }

@@ -55,70 +55,100 @@ def sanitize_bool(val):
 
 def get_easy_tracknum(afile, norm_key, _tag_name='tracknumber'):
     tracknumber = str(afile.mfile.get(_tag_name, None))
-    if tracknumber in (None, 'None'):
+    if tracknumber in (None, 'None', ''):
         tracknumber = None
     else:
-        tracknumber = tracknumber.split('/')[0]
+        tracknumber = tracknumber.split('/')[0].strip()
+        if not tracknumber:
+            tracknumber = None
     return tracknumber
 
 def set_easy_tracknum(afile, norm_key, val, _tag_name='tracknumber'):
-    tracknumber = [i for i in str(afile.mfile.get(_tag_name, '0/0')).split('/')]
-    tracknumber += [0] * (2 - len(tracknumber))
-    tracknumber[0] = val
-    afile.set_raw(norm_key, _tag_name,
-                  '/'.join(str(i) for i in tracknumber),
-                  appendable=False)
+    try:
+        raw_val = str(afile.mfile.get(_tag_name, ''))
+        tracknumber = [i.strip() for i in raw_val.split('/')] if raw_val not in (None, 'None', '') else []
+    except Exception:
+        tracknumber = []
+    tracknumber += ['0'] * max(0, 2 - len(tracknumber))
+    tracknumber[0] = str(val)
+    if len(tracknumber) > 1 and str(tracknumber[1]) not in ('0', 'None', ''):
+        res = f"{tracknumber[0]}/{tracknumber[1]}"
+    else:
+        res = str(tracknumber[0])
+    afile.set_raw(norm_key, _tag_name, res, appendable=False)
 
 def get_easy_totaltracks(afile, norm_key, _tag_name='tracknumber'):
     tracknumber = str(afile.mfile.get(_tag_name, None))
-    if tracknumber in (None, 'None'):
+    if tracknumber in (None, 'None', ''):
         tracknumber = None
     else:
         try:
-            tracknumber = tracknumber.split('/')[1]
+            tracknumber = tracknumber.split('/')[1].strip()
+            if not tracknumber:
+                tracknumber = None
         except IndexError:
             tracknumber = None
     return tracknumber
 
 def set_easy_totaltracks(afile, norm_key, val, _tag_name='tracknumber'):
-    tracknumber = [i for i in str(afile.mfile.get(_tag_name, '0/0')).split('/')]
-    tracknumber += [0] * (2 - len(tracknumber))
-    tracknumber[1] = val
-    afile.set_raw(norm_key, _tag_name,
-                  '/'.join(str(i) for i in tracknumber),
-                  appendable=False)
+    try:
+        raw_val = str(afile.mfile.get(_tag_name, ''))
+        tracknumber = [i.strip() for i in raw_val.split('/')] if raw_val not in (None, 'None', '') else []
+    except Exception:
+        tracknumber = []
+    tracknumber += ['0'] * max(0, 2 - len(tracknumber))
+    tracknumber[1] = str(val)
+    if str(tracknumber[1]) not in ('0', 'None', ''):
+        res = f"{tracknumber[0]}/{tracknumber[1]}"
+    else:
+        res = str(tracknumber[0])
+    afile.set_raw(norm_key, _tag_name, res, appendable=False)
 
 def get_easy_discnum(afile, norm_key, _tag_name='discnumber'):
     discnumber = str(afile.mfile.get(_tag_name, None))
-    if discnumber in (None, 'None'):
+    if discnumber in (None, 'None', ''):
         discnumber = None
     else:
-        discnumber = discnumber.split('/')[0]
+        discnumber = discnumber.split('/')[0].strip()
+        if not discnumber:
+            discnumber = None
     return discnumber
 
 def set_easy_discnum(afile, norm_key, val, _tag_name='discnumber'):
-    discnumber = [i for i in str(afile.mfile.get(_tag_name, '0/0')).split('/')]
-    discnumber += [0] * (2 - len(discnumber))
-    discnumber[0] = val
-    afile.set_raw(norm_key, _tag_name,
-                  '/'.join(str(i) for i in discnumber),
-                  appendable=False)
+    try:
+        raw_val = str(afile.mfile.get(_tag_name, ''))
+        discnumber = [i.strip() for i in raw_val.split('/')] if raw_val not in (None, 'None', '') else []
+    except Exception:
+        discnumber = []
+    discnumber += ['0'] * max(0, 2 - len(discnumber))
+    discnumber[0] = str(val)
+    if len(discnumber) > 1 and str(discnumber[1]) not in ('0', 'None', ''):
+        res = f"{discnumber[0]}/{discnumber[1]}"
+    else:
+        res = str(discnumber[0])
+    afile.set_raw(norm_key, _tag_name, res, appendable=False)
 
 def get_easy_totaldiscs(afile, norm_key, _tag_name='discnumber'):
     discnumber = str(afile.mfile.get(_tag_name, None))
-    if discnumber in (None, 'None'):
+    if discnumber in (None, 'None', ''):
         discnumber = None
     else:
         try:
-            discnumber = discnumber.split('/')[1]
+            discnumber = discnumber.split('/')[1].strip()
+            if not discnumber:
+                discnumber = None
         except IndexError:
             discnumber = None
     return discnumber
 
 def set_easy_totaldiscs(afile, norm_key, val, _tag_name='discnumber'):
-    discnumber = [i for i in str(afile.mfile.get(_tag_name, '0/0')).split('/')]
-    discnumber += [0] * (2 - len(discnumber))
-    discnumber[1] = val
+    try:
+        raw_val = str(afile.mfile.get(_tag_name, '0/0'))
+        discnumber = [i.strip() for i in raw_val.split('/')] if raw_val not in (None, 'None', '') else ['0', '0']
+    except Exception:
+        discnumber = ['0', '0']
+    discnumber += ['0'] * max(0, 2 - len(discnumber))
+    discnumber[1] = str(val)
     afile.set_raw(norm_key, _tag_name,
                   '/'.join(str(i) for i in discnumber),
                   appendable=False)

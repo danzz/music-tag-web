@@ -13,9 +13,34 @@ try:
 except ImportError:
     pass
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", globals().get("SECRET_KEY"))
-if not SECRET_KEY:
-    raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set")
+def _load_or_generate_secret_key():
+    key = os.getenv("DJANGO_SECRET_KEY", globals().get("SECRET_KEY"))
+    if key:
+        return key
+
+    # 优先从持久化数据目录 (/app/data/secret.key) 读取或自动生成并持久化，保障 NAS 容器即开即用且重启保持一致
+    data_dir = os.path.join(BASE_DIR, "data")
+    key_file = os.path.join(data_dir, "secret.key")
+    if os.path.exists(key_file):
+        try:
+            with open(key_file, "r", encoding="utf-8") as f:
+                saved = f.read().strip()
+                if saved:
+                    return saved
+        except Exception:
+            pass
+
+    import secrets
+    new_key = secrets.token_hex(32)
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        with open(key_file, "w", encoding="utf-8") as f:
+            f.write(new_key)
+    except Exception:
+        pass
+    return new_key
+
+SECRET_KEY = _load_or_generate_secret_key()
 
 DEBUG = False
 

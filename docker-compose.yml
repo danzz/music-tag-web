@@ -7,7 +7,8 @@ services:
     ports:
       - "8001:8001"
     environment:
-      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set a unique DJANGO_SECRET_KEY}"
+      # 可选：指定 Django 密钥，若不提供则会在 /app/data/secret.key 自动生成并持久化
+      # DJANGO_SECRET_KEY: "your-custom-secret-key"
       # 可选：Gunicorn 协程工作进程数（默认 1，单进程共享内存任务中心）
       # GUNICORN_WORKER_NUM: 1
       # 可选：磁盘写入并发线程数（默认 4，兼顾机械硬盘保护与并发写入）

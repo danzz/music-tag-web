@@ -118,25 +118,27 @@ def batch_save_sqlite_meta_cache(meta_items):
     if not meta_items:
         return
     try:
+        from django.db import transaction
         from applications.task.models import MusicMetaCache
-        for item in meta_items:
-            path = item.get("path")
-            mtime = item.get("_mtime", 0)
-            size = item.get("_size", 0)
-            if not path:
-                continue
-            save_item = item.copy()
-            save_item.pop("_mtime", None)
-            save_item.pop("_size", None)
-            meta_json = json.dumps(save_item, ensure_ascii=False)
-            MusicMetaCache.objects.update_or_create(
-                path=path,
-                defaults={
-                    "mtime": mtime,
-                    "size": size,
-                    "meta_json": meta_json,
-                }
-            )
+        with transaction.atomic():
+            for item in meta_items:
+                path = item.get("path")
+                mtime = item.get("_mtime", 0)
+                size = item.get("_size", 0)
+                if not path:
+                    continue
+                save_item = item.copy()
+                save_item.pop("_mtime", None)
+                save_item.pop("_size", None)
+                meta_json = json.dumps(save_item, ensure_ascii=False)
+                MusicMetaCache.objects.update_or_create(
+                    path=path,
+                    defaults={
+                        "mtime": mtime,
+                        "size": size,
+                        "meta_json": meta_json,
+                    }
+                )
     except Exception:
         pass
 
@@ -170,6 +172,8 @@ def extract_music_meta(entry_path, file_name, lrc_set, dir_files_set=None, mtime
     genre = ""
     year = ""
     lyrics = ""
+    tracknumber = ""
+    discnumber = ""
     has_cover = False
 
     try:
@@ -197,9 +201,37 @@ def extract_music_meta(entry_path, file_name, lrc_set, dir_files_set=None, mtime
         lyr = f['lyrics'].value
         if lyr and str(lyr).strip():
             lyrics = str(lyr).strip()
+        try:
+            tn = f['tracknumber'].value
+            if tn is not None and str(tn).strip() not in ("", "0"):
+                tracknumber = str(tn).strip()
+        except Exception:
+            pass
+        try:
+            dn = f['discnumber'].value
+            if dn is not None and str(dn).strip() not in ("", "0"):
+                discnumber = str(dn).strip()
+        except Exception:
+            pass
         artwork = f['artwork'].values
         if artwork:
             has_cover = True
+            try:
+                art = artwork[0]
+                if isinstance(art, bytes):
+                    thumb = art
+                    mime = "image/jpeg"
+                else:
+                    try:
+                        thumb = art.raw_thumbnail([128, 128])
+                        mime = getattr(art, 'mime', None) or "image/jpeg"
+                    except Exception:
+                        thumb = getattr(art, 'raw', None) or (art if isinstance(art, bytes) else b"")
+                        mime = getattr(art, 'mime', None) or "image/jpeg"
+                if thumb:
+                    _cover_cache[(entry_path, mtime)] = (thumb, mime)
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -226,6 +258,8 @@ def extract_music_meta(entry_path, file_name, lrc_set, dir_files_set=None, mtime
         "artist": artist,
         "album": album,
         "albumartist": albumartist,
+        "tracknumber": tracknumber,
+        "discnumber": discnumber,
         "genre": genre,
         "year": year,
         "has_lyrics": bool(lyrics),

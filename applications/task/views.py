@@ -24,7 +24,6 @@ from applications.task.services import folder_music_service
 from applications.task.tasks import batch_auto_tag_task, tidy_folder_task, process_single_auto_tag_task
 from applications.utils.translation import translation_lyc_text
 from component.drf.viewsets import GenericViewSet
-from django_vue_cli.celery_app import app as celery_app
 
 
 from django.views.decorators.csrf import csrf_exempt
@@ -244,8 +243,8 @@ class TaskViewSets(GenericViewSet):
         if not img_bytes:
             return HttpResponse(status=404)
         response = HttpResponse(img_bytes, content_type=mime)
-        response['Cache-Control'] = 'no-cache, must-revalidate'
-        response['Pragma'] = 'no-cache'
+        # 带有文件修改时间戳版本号，允许浏览器长效缓存，极大减轻 NAS 机械硬盘并发请求压力
+        response['Cache-Control'] = 'public, max-age=604800'
         return response
 
     @action(methods=['POST'], detail=False)
@@ -299,9 +298,10 @@ class TaskViewSets(GenericViewSet):
         if apply_to_all:
             try:
                 entries = list(os.scandir(full_path))
+                entries.sort(key=lambda e: e.name)
             except Exception:
                 entries = []
-            for entry in entries:
+            for idx, entry in enumerate(entries, 1):
                 if entry.is_file():
                     each = entry.name
                     file_type = each.split(".")[-1].lower()
@@ -312,18 +312,20 @@ class TaskViewSets(GenericViewSet):
                     item.update({
                         "file_full_path": item_path,
                         "filename": each,
-                        "song_name": ".".join(each.split(".")[:-1])
+                        "song_name": ".".join(each.split(".")[:-1]),
+                        "sequence_index": idx
                     })
                     music_id3_info.append(item)
         else:
-            for data in select_data:
+            for idx, data in enumerate(select_data, 1):
                 if data.get('icon') == 'icon-folder':
                     file_full_path = os.path.normpath(f"{full_path}/{data.get('name')}")
                     try:
                         entries = list(os.scandir(file_full_path))
+                        entries.sort(key=lambda e: e.name)
                     except Exception:
                         continue
-                    for index, entry in enumerate(entries, 1):
+                    for sub_idx, entry in enumerate(entries, 1):
                         each = entry.name
                         file_type = each.split(".")[-1].lower()
                         if file_type not in allow_type:
@@ -333,7 +335,8 @@ class TaskViewSets(GenericViewSet):
                         item.update({
                             "file_full_path": item_path,
                             "filename": each,
-                            "song_name": ".".join(each.split(".")[:-1])
+                            "song_name": ".".join(each.split(".")[:-1]),
+                            "sequence_index": sub_idx
                         })
                         music_id3_info.append(item)
                 else:
@@ -343,8 +346,12 @@ class TaskViewSets(GenericViewSet):
                     item.update({
                         "file_full_path": item_path,
                         "filename": name,
-                        "song_name": ".".join(name.split(".")[:-1])
+                        "song_name": ".".join(name.split(".")[:-1]),
+                        "sequence_index": data.get("sequence_index", idx)
                     })
+                    for k in ["tracknumber", "discnumber", "title", "artist", "album", "albumartist"]:
+                        if k in data and data[k] is not None:
+                            item[k] = data[k]
                     music_id3_info.append(item)
 
         target_paths = [item["file_full_path"] for item in music_id3_info]
@@ -524,26 +531,103 @@ class TaskViewSets(GenericViewSet):
     @action(methods=['POST'], detail=False)
     def tidy_folder(self, request, *args, **kwargs):
         validate_data = self.is_validated_data(request.data)
-        root_path = validate_data["root_path"]
+        root_path = os.path.normpath(validate_data["root_path"])
         first_dir = validate_data["first_dir"]
-        full_path = validate_data["file_full_path"]
-        select_data = validate_data["select_data"]
-        second_dir = validate_data.get("second_dir", "")
-        music_id3_info = []
-        for data in select_data:
-            if data.get('icon') == 'icon-folder':
-                file_full_path = f"{full_path}/{data.get('name')}"
-                data = os.scandir(file_full_path)
-                for index, entry in enumerate(data, 1):
+        second_dir = validate_data.get("second_dir", "") or ""
+        full_path = os.path.normpath(validate_data["file_full_path"])
+        select_data = validate_data.get("select_data", [])
+        apply_to_all = validate_data.get("apply_to_all", False)
+        move_lrc = validate_data.get("move_lrc", True)
+        conflict_action = validate_data.get("conflict_action", "skip")
+        clean_empty_dir = validate_data.get("clean_empty_dir", False)
+
+        allow_type = ["flac", "mp3", "ape", "wav", "aiff", "wv", "tta", "m4a", "ogg", "mpc",
+                      "opus", "wma", "dsf", "dff"]
+        task_items = []
+
+        if apply_to_all:
+            try:
+                entries = list(os.scandir(full_path))
+                entries.sort(key=lambda e: e.name)
+            except Exception:
+                entries = []
+            for idx, entry in enumerate(entries, 1):
+                if entry.is_file():
                     each = entry.name
-                    file_type = each.split(".")[-1]
-                    if file_type not in ALLOW_TYPE:
+                    file_type = each.split(".")[-1].lower()
+                    if file_type not in allow_type:
                         continue
-                    music_id3_info.append(f"{file_full_path}/{each}")
-            else:
-                music_id3_info.append(f"{full_path}/{data.get('name')}")
-        tidy_folder_task(music_id3_info, {"root_path": root_path, "first_dir": first_dir, "second_dir": second_dir})
-        return self.success_response()
+                    item_path = os.path.normpath(entry.path)
+                    sname = ".".join(each.split(".")[:-1])
+                    task_items.append({
+                        "file_full_path": item_path,
+                        "filename": each,
+                        "song_name": sname,
+                        "artist": "",
+                        "sequence_index": idx
+                    })
+        else:
+            for idx, data in enumerate(select_data, 1):
+                name = data.get("filename") or data.get("name")
+                if not name:
+                    continue
+                if data.get("icon") == "icon-folder":
+                    folder_path = os.path.normpath(f"{full_path}/{name}")
+                    try:
+                        entries = list(os.scandir(folder_path))
+                        entries.sort(key=lambda e: e.name)
+                    except Exception:
+                        continue
+                    for sub_idx, sub_entry in enumerate(entries, 1):
+                        if sub_entry.is_file():
+                            each = sub_entry.name
+                            file_type = each.split(".")[-1].lower()
+                            if file_type not in allow_type:
+                                continue
+                            item_path = os.path.normpath(sub_entry.path)
+                            sname = ".".join(each.split(".")[:-1])
+                            task_items.append({
+                                "file_full_path": item_path,
+                                "filename": each,
+                                "song_name": sname,
+                                "artist": "",
+                                "sequence_index": sub_idx
+                            })
+                else:
+                    item_path = os.path.normpath(data.get("path") or f"{full_path}/{name}")
+                    sname = ".".join(name.split(".")[:-1])
+                    task_items.append({
+                        "file_full_path": item_path,
+                        "filename": name,
+                        "song_name": sname,
+                        "artist": data.get("artist", ""),
+                        "sequence_index": idx
+                    })
+
+        if not task_items:
+            return self.failure_response(msg="未找到需要整理的有效音频文件")
+
+        target_paths = [item["file_full_path"] for item in task_items]
+        from applications.task.services.task_store import task_store
+        has_active, count, samples = task_store.check_active_tasks(target_paths)
+        if has_active:
+            sample_str = "、".join(samples)
+            if count > len(samples):
+                sample_str += f" 等共 {count} 首"
+            return self.failure_response(msg=f"检测到所选范围内有歌曲（{sample_str}）正在处理或排队中，请等待当前任务全部执行完毕后再提交！")
+
+        timestamp = str(int(time.time() * 1000))
+        task_store.init_batch(timestamp, task_items, task_type="tidy_folder")
+        tidy_config = {
+            "root_path": root_path,
+            "first_dir": first_dir,
+            "second_dir": second_dir,
+            "move_lrc": move_lrc,
+            "conflict_action": conflict_action,
+            "clean_empty_dir": clean_empty_dir
+        }
+        total = tidy_folder_task(timestamp, task_items, tidy_config)
+        return self.success_response(data={"batch": timestamp, "total": total})
 
     @action(methods=['POST'], detail=False)
     def upload_image(self, request, *args, **kwargs):
@@ -569,24 +653,11 @@ class TaskViewSets(GenericViewSet):
 
     @action(methods=["get"], detail=False)
     def clear_celery(self, request, *args, **kwargs):
-        active_tasks = celery_app.control.inspect().active()
-        try:
-            active_tasks_data = list(active_tasks.values())[0]
-        except Exception:
-            return self.success_response()
-        for task in active_tasks_data:
-            celery_app.control.revoke(task["id"], terminate=True)
-        celery_app.control.purge()
         return self.success_response()
 
     @action(methods=["get"], detail=False)
     def active_queue(self, request, *args, **kwargs):
-        active_tasks = celery_app.control.inspect().active()
-        try:
-            active_tasks_data = list(active_tasks.values())[0]
-        except Exception:
-            return self.success_response()
-        return self.success_response(data=active_tasks_data)
+        return self.success_response(data=[])
 
     @action(methods=['POST'], detail=False)
     def force_refresh_cache(self, request, *args, **kwargs):

@@ -24,8 +24,8 @@ class MusicId3Serializer(serializers.Serializer):
     album_type = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     language = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     albumartist = serializers.CharField(required=True, allow_null=True, allow_blank=True)
-    discnumber = serializers.CharField(required=True, allow_null=True, allow_blank=True)
-    tracknumber = serializers.CharField(required=True, allow_null=True, allow_blank=True)
+    discnumber = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    tracknumber = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     genre = serializers.CharField(required=True, allow_null=True, allow_blank=True)
     year = serializers.CharField(required=True, allow_null=True, allow_blank=True)
     lyrics = serializers.CharField(required=True, allow_null=True, allow_blank=True)
@@ -67,8 +67,12 @@ class TidyFolderSerializer(serializers.Serializer):
     root_path = serializers.CharField(required=True)
     first_dir = serializers.CharField(required=True)
     second_dir = serializers.CharField(required=False, allow_null=True, allow_blank=True)
-    file_full_path = serializers.JSONField(required=True)
-    select_data = serializers.JSONField(required=True)
+    file_full_path = serializers.CharField(required=True)
+    select_data = serializers.JSONField(required=False, default=list)
+    apply_to_all = serializers.BooleanField(required=False, default=False)
+    move_lrc = serializers.BooleanField(required=False, default=True)
+    conflict_action = serializers.CharField(required=False, default="skip")
+    clean_empty_dir = serializers.BooleanField(required=False, default=False)
 
 
 class TaskSerializer(serializers.ModelSerializer):

@@ -14,3 +14,6 @@ venv
 /media/
 db.sqlite3
 local_settings.py
+*.tar
+*.tar.gz
+test_environment/

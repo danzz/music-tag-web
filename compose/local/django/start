@@ -5,10 +5,21 @@ set -o pipefail
 set -o nounset
 
 
+if [ -z "${DJANGO_SECRET_KEY:-}" ]; then
+  if [ -f "/app/data/secret.key" ]; then
+    export DJANGO_SECRET_KEY="$(cat /app/data/secret.key)"
+  else
+    mkdir -p /app/data
+    export DJANGO_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+    echo "$DJANGO_SECRET_KEY" > /app/data/secret.key 2>/dev/null || true
+  fi
+fi
+
 python manage.py migrate --run-syncdb
 PORT=${PORT:-8001}
-# 单进程 + Gevent 协程架构，共享单一 Python 堆内存任务中心
+# 单进程 + 多线程 (gthread) 架构：共享内存任务中心，同时在文件 I/O 与图片缩略图计算时释放 GIL，彻底避免单线程卡死
 WORKERS=${GUNICORN_WORKER_NUM:-1}
-exec gunicorn -w ${WORKERS} -b 0.0.0.0:${PORT} django_vue_cli.wsgi:application --timeout 120 --worker-class=gevent --worker-connections=1000
+THREADS=${GUNICORN_THREADS:-8}
+exec gunicorn -w ${WORKERS} --threads ${THREADS} -b 0.0.0.0:${PORT} django_vue_cli.wsgi:application --timeout 120 --worker-class=gthread
 
 #python manage.py runserver 0.0.0.0:8001

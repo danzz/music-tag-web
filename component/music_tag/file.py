@@ -142,7 +142,12 @@ class MetadataItem(object):
         if not self._values:
             val = 0
         elif len(self._values) == 1:
-            val = int(self._values[0])
+            try:
+                import re
+                m = re.search(r'\d+', str(self._values[0]))
+                val = int(m.group(0)) if m else 0
+            except Exception:
+                val = 0
         else:
             raise ValueError("Metadata must have 1 value to cast to int")
         return val
