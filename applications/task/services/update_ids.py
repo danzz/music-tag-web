@@ -25,7 +25,13 @@ def prepare_artwork_image(raw_input, max_dim=2048, is_thumbnail=False):
         return None, "jpg"
 
     img_content = None
-    if isinstance(raw_input, str) and raw_input.startswith("http"):
+    if isinstance(raw_input, str) and os.path.isfile(raw_input):
+        try:
+            with open(raw_input, "rb") as f_img:
+                img_content = f_img.read()
+        except Exception as e:
+            raise ValueError(f"读取本地封面图片失败: {e}")
+    elif isinstance(raw_input, str) and raw_input.startswith("http"):
         try:
             img_data = send().GET(raw_input)
             if img_data.status_code == 200:

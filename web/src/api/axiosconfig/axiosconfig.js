@@ -3,7 +3,7 @@ import axios from 'axios'
 
 axios.defaults.baseURL = window.siteUrl
 axios.defaults.withCredentials = true
-axios.defaults.timeout = 200000
+axios.defaults.timeout = 300000
 axios.defaults.crossDomain = true
 
 axios.interceptors.request.use((config) => {

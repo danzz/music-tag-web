@@ -63,5 +63,20 @@ export default {
     },
     retryFailed: function(params) {
         return POST(reUrl + '/api/retry_failed/', params)
+    },
+    agentPlan: function(params) {
+        return POST(reUrl + '/api/agent_plan/', params)
+    },
+    agentTestConnection: function(params) {
+        return POST(reUrl + '/api/agent_test_connection/', params)
+    },
+    generateCourseCover: function(params) {
+        return POST(reUrl + '/api/generate_course_cover/', params)
+    },
+    applyCourseCover: function(params) {
+        return POST(reUrl + '/api/apply_course_cover/', params)
+    },
+    testComfyuiConnection: function(params) {
+        return POST(reUrl + '/api/test_comfyui_connection/', params)
     }
 }

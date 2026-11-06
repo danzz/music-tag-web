@@ -16,7 +16,7 @@ from applications.task.filters import TaskFilters, TaskRecordFilters
 from applications.task.models import TaskRecord, Task
 from applications.task.serialziers import FileListSerializer, Id3Serializer, UpdateId3Serializer, \
     FetchId3ByTitleSerializer, FetchLlyricSerializer, BatchUpdateId3Serializer, TranslationLycSerializer, \
-    TidyFolderSerializer, TaskSerializer, TaskRecordSerializer, UploadImageSerializer, RetryFailedSerializer, FolderMusicListSerializer
+    TidyFolderSerializer, TaskSerializer, TaskRecordSerializer, UploadImageSerializer, RetryFailedSerializer, FolderMusicListSerializer, AgentPlanSerializer, AgentTestConnectionSerializer, GenerateCourseCoverSerializer, ApplyCourseCoverSerializer, TestComfyuiConnectionSerializer
 from applications.task.services.music_ids import MusicIDS
 from applications.task.services.music_resource import MusicResource
 from applications.task.services.update_ids import update_music_info, update_music_info_async
@@ -80,6 +80,16 @@ class TaskViewSets(GenericViewSet):
             return UploadImageSerializer
         elif self.action == "retry_failed":
             return RetryFailedSerializer
+        elif self.action == "agent_plan":
+            return AgentPlanSerializer
+        elif self.action == "agent_test_connection":
+            return AgentTestConnectionSerializer
+        elif self.action == "generate_course_cover":
+            return GenerateCourseCoverSerializer
+        elif self.action == "apply_course_cover":
+            return ApplyCourseCoverSerializer
+        elif self.action == "test_comfyui_connection":
+            return TestComfyuiConnectionSerializer
         return FileListSerializer
 
     @action(methods=['POST'], detail=False)
@@ -340,16 +350,21 @@ class TaskViewSets(GenericViewSet):
                         })
                         music_id3_info.append(item)
                 else:
-                    item_path = os.path.normpath(f"{full_path}/{data.get('name')}")
+                    name = data.get('name') or data.get('filename', '')
+                    item_path = os.path.normpath(f"{full_path}/{name}")
                     item = dict(music_info)
-                    name = data.get('name', '')
                     item.update({
                         "file_full_path": item_path,
                         "filename": name,
                         "song_name": ".".join(name.split(".")[:-1]),
                         "sequence_index": data.get("sequence_index", idx)
                     })
-                    for k in ["tracknumber", "discnumber", "title", "artist", "album", "albumartist"]:
+                    all_tag_keys = [
+                        "tracknumber", "discnumber", "title", "artist", "album", "albumartist",
+                        "year", "genre", "comment", "lyrics", "album_img", "clear_cover",
+                        "is_save_lyrics_file", "is_save_album_cover", "language", "album_type"
+                    ]
+                    for k in all_tag_keys:
                         if k in data and data[k] is not None:
                             item[k] = data[k]
                     music_id3_info.append(item)
@@ -665,6 +680,342 @@ class TaskViewSets(GenericViewSet):
         file_path = request.data.get('file_path', '')
         folder_music_service.force_clear_all_caches(file_path)
         return self.success_response(msg="缓存已强制清空")
+
+    @action(methods=['POST'], detail=False)
+    def agent_plan(self, request, *args, **kwargs):
+        """Web 内置轻量 Agent 智能规划接口"""
+        validate_data = self.is_validated_data(request.data)
+        dir_path = os.path.normpath(validate_data['dir_path'])
+        mode = validate_data.get('mode', 'auto')
+        files = validate_data.get('files', [])
+        system_prompt = validate_data.get('system_prompt', '').strip()
+        user_prompt = validate_data.get('user_prompt', '').strip()
+        ai_config = validate_data.get('ai_config', {}) or {}
+
+        # 1. 本地规则引擎生成基础方案
+        from scripts.music_tag_cli import MusicTagClient
+        client = MusicTagClient(base_url="http://127.0.0.1:8001")
+        plan_res = client.auto_plan(dir_path, plan_type=mode)
+
+        # 如果指定了特定文件，做过滤
+        if files:
+            file_set = set(files)
+            plan_res["plan"] = [p for p in plan_res.get("plan", []) if p.get("name") in file_set]
+            plan_res["summary"]["needs_curation"] = len(plan_res["plan"])
+
+        # 2. 如果配置了云端/本地大模型，调用大模型对方案进行语义精炼
+        api_key = (ai_config.get('api_key') or ai_config.get('apiKey') or '').strip()
+        base_url = (ai_config.get('base_url') or ai_config.get('baseUrl') or '').strip().rstrip('/') or 'https://api.openai.com/v1'
+        model = (ai_config.get('model') or '').strip()
+
+        if model and plan_res.get("plan"):
+            try:
+                import urllib.request
+                import json
+                import re
+
+                llm_endpoint = f"{base_url}/chat/completions"
+                sys_content = system_prompt or "你是一位专业的数字音频馆藏专家，负责对音频文件的标签、音轨号、专辑与作者信息进行消歧与清洗。"
+
+                items_for_llm = []
+                for p in plan_res["plan"]:
+                    prop = p.get("proposed") or {}
+                    items_for_llm.append({
+                        "filename": p.get("name"),
+                        "current_title": p.get("current", {}).get("title"),
+                        "current_artist": p.get("current", {}).get("artist"),
+                        "current_album": p.get("current", {}).get("album"),
+                        "proposed_title": prop.get("title"),
+                        "proposed_artist": prop.get("artist"),
+                        "proposed_album": prop.get("album"),
+                        "proposed_track": prop.get("tracknumber"),
+                    })
+
+                user_content = {
+                    "dir_name": os.path.basename(dir_path),
+                    "detected_mode": plan_res.get("mode", "music"),
+                    "user_instruction": user_prompt or "请审查并润色上述方案，剔除残余广告，确保标题纯正优雅，输出修改后的建议。",
+                    "items": items_for_llm
+                }
+
+                req_payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": sys_content + "\n请严格以 JSON 格式输出，返回一个数组，包含对象的键：filename, title, artist, album, tracknumber, reason。不要输出任何 Markdown 格式或额外解释文本。"},
+                        {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
+                    ],
+                    "temperature": float(ai_config.get("temperature", 0.3)),
+                }
+
+                req_headers = {"Content-Type": "application/json"}
+                if api_key:
+                    req_headers["Authorization"] = f"Bearer {api_key}"
+
+                req = urllib.request.Request(
+                    llm_endpoint,
+                    data=json.dumps(req_payload).encode('utf-8'),
+                    headers=req_headers,
+                    method="POST"
+                )
+
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    resp_json = json.loads(resp.read().decode('utf-8'))
+                    llm_text = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                    if "```" in llm_text:
+                        match = re.search(r'```(?:json)?\s*(.*?)\s*```', llm_text, re.DOTALL)
+                        if match:
+                            llm_text = match.group(1).strip()
+
+                    llm_items = json.loads(llm_text)
+                    if isinstance(llm_items, list):
+                        llm_map = {item.get("filename"): item for item in llm_items if item.get("filename")}
+                        for p in plan_res["plan"]:
+                            fn = p.get("name")
+                            if fn in llm_map and p.get("proposed"):
+                                refined = llm_map[fn]
+                                if refined.get("title"):
+                                    p["proposed"]["title"] = refined["title"]
+                                if refined.get("artist"):
+                                    p["proposed"]["artist"] = refined["artist"]
+                                    p["proposed"]["albumartist"] = refined["artist"]
+                                if refined.get("album"):
+                                    p["proposed"]["album"] = refined["album"]
+                                if refined.get("tracknumber"):
+                                    p["proposed"]["tracknumber"] = str(refined["tracknumber"])
+                                if refined.get("reason"):
+                                    p["reason"] = f"[LLM 润色] {refined['reason']}"
+                        plan_res["llm_status"] = "success"
+            except Exception as e:
+                plan_res["llm_status"] = f"warning: 大模型调用异常 ({str(e)})，已自动使用内置规则引擎方案"
+        else:
+            plan_res["llm_status"] = "local_rules"
+
+        return self.success_response(data=plan_res)
+
+    @action(methods=['POST'], detail=False)
+    def agent_test_connection(self, request, *args, **kwargs):
+        """测试 AI 大模型接口连通性与可用性"""
+        validate_data = self.is_validated_data(request.data)
+        base_url = (validate_data.get('base_url') or validate_data.get('baseUrl') or '').strip().rstrip('/')
+        api_key = (validate_data.get('api_key') or validate_data.get('apiKey') or '').strip()
+        model = (validate_data.get('model') or '').strip()
+
+        if not base_url:
+            base_url = 'https://api.openai.com/v1'
+
+        if not model:
+            return self.failure_response(msg="请填写模型名称 (Model Name)，例如：qwen3.8:27b-mlx、gpt-4o-mini 等")
+
+        endpoint = f"{base_url}/chat/completions"
+        headers = {
+            "Content-Type": "application/json"
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        test_payload = {
+            "model": model,
+            "messages": [
+                {"role": "user", "content": "Hello, respond with: OK"}
+            ],
+            "max_tokens": 15,
+            "temperature": 0.1
+        }
+
+        import time
+        import urllib.request
+        import urllib.error
+        import json
+
+        t0 = time.time()
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(test_payload).encode('utf-8'),
+                headers=headers,
+                method="POST"
+            )
+            # 10 秒超时
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                status_code = resp.getcode()
+                raw_body = resp.read().decode('utf-8', errors='ignore')
+                latency_ms = int((time.time() - t0) * 1000)
+
+                resp_json = json.loads(raw_body)
+                choices = resp_json.get("choices", [])
+                reply = ""
+                if choices and isinstance(choices, list):
+                    reply = choices[0].get("message", {}).get("content", "").strip()
+
+                return self.success_response(
+                    msg=f"测试成功！连接正常，模型响应耗时 {latency_ms} ms",
+                    data={
+                        "latency_ms": latency_ms,
+                        "model": model,
+                        "status_code": status_code,
+                        "reply": reply or "OK"
+                    }
+                )
+        except urllib.error.HTTPError as e:
+            latency_ms = int((time.time() - t0) * 1000)
+            err_body = ""
+            try:
+                err_body = e.read().decode('utf-8', errors='ignore')
+            except Exception:
+                pass
+
+            msg = f"HTTP 错误 {e.code}"
+            if e.code == 401:
+                msg = "认证失败 (401 Unauthorized)：API Key 无效或未提供正确凭证"
+            elif e.code == 404:
+                msg = f"未找到端点或模型 (404 Not Found)：请检查 Base URL 是否需包含 /v1，或模型「{model}」在服务端是否存在"
+            elif e.code == 403:
+                msg = "访问被拒绝 (403 Forbidden)：无权访问该接口或模型"
+            elif e.code == 429:
+                msg = "请求过多或配额不足 (429 Rate Limit / Quota Exceeded)"
+            elif e.code >= 500:
+                msg = f"服务端错误 ({e.code})：{err_body[:180] if err_body else '模型服务内部故障'}"
+            else:
+                if err_body:
+                    msg += f"：{err_body[:150]}"
+
+            return self.failure_response(msg=msg)
+        except urllib.error.URLError as e:
+            reason_str = str(e.reason)
+            if "Connection refused" in reason_str or "111" in reason_str or "61" in reason_str:
+                msg = f"连接被拒绝 (Connection Refused)：无法连接到 {base_url}。请确认服务已启动并监听外部网络；若在 Docker 中访问宿主机服务，可尝试将地址设为 http://host.docker.internal:端口"
+            elif "timed out" in reason_str.lower() or "timeout" in reason_str.lower():
+                msg = f"连接超时 (Timeout)：请求 {base_url} 超过 10 秒无响应，请检查 IP、端口及防火墙设置"
+            elif "Name or service not known" in reason_str or "nodename nor servname provided" in reason_str:
+                msg = f"无法解析地址 (DNS Error)：无法识别主机名或域名，请检查 Base URL 是否正确"
+            else:
+                msg = f"网络连接失败：{reason_str}"
+            return self.failure_response(msg=msg)
+        except Exception as e:
+            return self.failure_response(msg=f"测试失败：{str(e)}")
+
+    @action(methods=['POST'], detail=False)
+    def test_comfyui_connection(self, request, *args, **kwargs):
+        """测试 ComfyUI 服务连通性、设备与显存状态"""
+        validate_data = self.is_validated_data(request.data)
+        url = (validate_data.get('comfyui_url') or 'http://host.docker.internal:8188').strip().rstrip('/')
+
+        import time
+        import urllib.request
+        import urllib.error
+        import json
+
+        endpoint = f"{url}/system_stats"
+        t0 = time.time()
+        try:
+            req = urllib.request.Request(endpoint, headers={"User-Agent": "MusicTagWeb"}, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                raw_body = resp.read().decode('utf-8', errors='ignore')
+                latency_ms = int((time.time() - t0) * 1000)
+                stats = json.loads(raw_body)
+
+                system_info = stats.get('system', {})
+                devices = stats.get('devices', [])
+                dev_str = ""
+                if devices:
+                    d = devices[0]
+                    name = d.get('name', 'GPU')
+                    vram_free = round(d.get('vram_free', 0) / (1024**3), 2)
+                    vram_total = round(d.get('vram_total', 0) / (1024**3), 2)
+                    dev_str = f"{name} (可用显存: {vram_free}G / 总显存: {vram_total}G)"
+                else:
+                    dev_str = system_info.get('os', '运行正常')
+
+                return self.success_response(
+                    msg=f"连接成功！ComfyUI 响应耗时 {latency_ms} ms。设备：{dev_str}",
+                    data={
+                        "latency_ms": latency_ms,
+                        "device": dev_str,
+                        "system": system_info
+                    }
+                )
+        except urllib.error.HTTPError as e:
+            return self.failure_response(msg=f"服务响应 HTTP {e.code}：{e.reason}")
+        except urllib.error.URLError as e:
+            reason_str = str(e.reason)
+            if "Connection refused" in reason_str or "111" in reason_str or "61" in reason_str:
+                msg = f"连接被拒绝 (Connection Refused)：服务未在该端口运行，或未配置允许外部访问。"
+            elif "timed out" in reason_str.lower() or "timeout" in reason_str.lower():
+                msg = f"连接超时 (Timeout)：无法连接到 {url}。若服务在 Windows 上运行，请检查 ComfyUI 是否添加了 --listen 0.0.0.0 参数，以及 Windows 防火墙是否放行了 8188 端口。"
+            else:
+                msg = f"网络连接失败：{reason_str}"
+            return self.failure_response(msg=msg)
+        except Exception as e:
+            return self.failure_response(msg=f"测试失败：{str(e)}")
+
+    @action(methods=['POST'], detail=False)
+    def generate_course_cover(self, request, *args, **kwargs):
+        """生成得到/音频课程专属封面预览"""
+        validate_data = self.is_validated_data(request.data)
+        folder_path = os.path.normpath(validate_data['folder_path'])
+        title = validate_data['title'].strip()
+        author = validate_data.get('author', '').strip()
+        category = validate_data.get('category', '得到课程').strip()
+        prompt = validate_data.get('prompt', '').strip()
+        engine = validate_data.get('engine', 'comfyui')
+        comfyui_url = validate_data.get('comfyui_url', 'http://host.docker.internal:8188').strip()
+        style = validate_data.get('style', 'amber_dark')
+        quality = validate_data.get('quality', 'fast')
+        layout = validate_data.get('layout', 'dedao_clean')
+        font_size = validate_data.get('font_size', 'auto')
+
+        from applications.task.services.cover_generator import CourseCoverGenerator
+        start_time = time.time()
+        try:
+            res = CourseCoverGenerator.generate_cover(
+                title=title,
+                author=author,
+                category=category,
+                prompt=prompt,
+                engine=engine,
+                comfyui_url=comfyui_url,
+                style=style,
+                quality=quality,
+                layout=layout,
+                font_size=font_size
+            )
+            cost_sec = round(time.time() - start_time, 2)
+            return self.success_response(data={
+                "image_base64": res["image_base64"],
+                "source": res["source"],
+                "cost_sec": cost_sec,
+                "title": title,
+                "author": author,
+                "category": category
+            })
+        except Exception as e:
+            return self.failure_response(msg=f"封面生成失败: {str(e)}")
+
+    @action(methods=['POST'], detail=False)
+    def apply_course_cover(self, request, *args, **kwargs):
+        """保存封面到目录并内嵌音频标签"""
+        validate_data = self.is_validated_data(request.data)
+        folder_path = os.path.normpath(validate_data['folder_path'])
+        image_base64 = validate_data['image_base64']
+        embed_to_files = validate_data.get('embed_to_files', True)
+
+        if not os.path.isdir(folder_path):
+            return self.failure_response(msg="指定的课程目录不存在")
+
+        if "," in image_base64:
+            image_base64 = image_base64.split(",", 1)[1]
+        image_bytes = base64.b64decode(image_base64)
+
+        from applications.task.services.cover_generator import CourseCoverGenerator
+        try:
+            res = CourseCoverGenerator.save_and_embed_cover(
+                folder_path=folder_path,
+                image_bytes=image_bytes,
+                embed_to_files=embed_to_files
+            )
+            return self.success_response(data=res, msg=f"封面已成功保存为 cover.jpg，并已内嵌写入 {res['embedded_files']} 首音频")
+        except Exception as e:
+            return self.failure_response(msg=f"保存或内嵌封面失败: {str(e)}")
 
     @action(methods=['GET'], detail=False, permission_classes=[AllowAny], authentication_classes=[], renderer_classes=[ServerSentEventRenderer])
     def events(self, request, *args, **kwargs):

@@ -20,6 +20,7 @@ PORT=${PORT:-8001}
 # 单进程 + 多线程 (gthread) 架构：共享内存任务中心，同时在文件 I/O 与图片缩略图计算时释放 GIL，彻底避免单线程卡死
 WORKERS=${GUNICORN_WORKER_NUM:-1}
 THREADS=${GUNICORN_THREADS:-8}
-exec gunicorn -w ${WORKERS} --threads ${THREADS} -b 0.0.0.0:${PORT} django_vue_cli.wsgi:application --timeout 120 --worker-class=gthread
+TIMEOUT=${GUNICORN_TIMEOUT:-300}
+exec gunicorn -w ${WORKERS} --threads ${THREADS} -b 0.0.0.0:${PORT} django_vue_cli.wsgi:application --timeout ${TIMEOUT} --worker-class=gthread
 
 #python manage.py runserver 0.0.0.0:8001

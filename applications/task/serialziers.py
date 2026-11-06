@@ -75,6 +75,48 @@ class TidyFolderSerializer(serializers.Serializer):
     clean_empty_dir = serializers.BooleanField(required=False, default=False)
 
 
+class AgentPlanSerializer(serializers.Serializer):
+    dir_path = serializers.CharField(required=True)
+    mode = serializers.CharField(required=False, default="auto")
+    files = serializers.ListField(required=False, default=list)
+    system_prompt = serializers.CharField(required=False, allow_blank=True, default="")
+    user_prompt = serializers.CharField(required=False, allow_blank=True, default="")
+    ai_config = serializers.DictField(required=False, default=dict)
+
+
+class AgentTestConnectionSerializer(serializers.Serializer):
+    base_url = serializers.CharField(required=False, allow_blank=True, default="")
+    baseUrl = serializers.CharField(required=False, allow_blank=True, default="")
+    api_key = serializers.CharField(required=False, allow_blank=True, default="")
+    apiKey = serializers.CharField(required=False, allow_blank=True, default="")
+    model = serializers.CharField(required=False, allow_blank=True, default="")
+    temperature = serializers.FloatField(required=False, default=0.2)
+
+
+class TestComfyuiConnectionSerializer(serializers.Serializer):
+    comfyui_url = serializers.CharField(required=False, allow_blank=True, default="http://host.docker.internal:8188")
+
+
+class GenerateCourseCoverSerializer(serializers.Serializer):
+    folder_path = serializers.CharField(required=True)
+    title = serializers.CharField(required=True)
+    author = serializers.CharField(required=False, allow_blank=True, default="")
+    category = serializers.CharField(required=False, allow_blank=True, default="得到课程")
+    prompt = serializers.CharField(required=False, allow_blank=True, default="")
+    engine = serializers.CharField(required=False, default="comfyui")
+    comfyui_url = serializers.CharField(required=False, allow_blank=True, default="http://host.docker.internal:8188")
+    style = serializers.CharField(required=False, default="amber_dark")
+    quality = serializers.CharField(required=False, default="fast")
+    layout = serializers.CharField(required=False, default="dedao_clean")
+    font_size = serializers.CharField(required=False, default="auto")
+
+
+class ApplyCourseCoverSerializer(serializers.Serializer):
+    folder_path = serializers.CharField(required=True)
+    image_base64 = serializers.CharField(required=True)
+    embed_to_files = serializers.BooleanField(required=False, default=True)
+
+
 class TaskSerializer(serializers.ModelSerializer):
     message = serializers.SerializerMethodField()
 

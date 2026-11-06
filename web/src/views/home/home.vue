@@ -105,11 +105,23 @@
                             <bk-icon type="edit" style="margin-right: 4px;"></bk-icon>批量修改
                         </bk-button>
 
+                        <bk-button size="small" theme="warning" @click="openAiPlanDialog" style="margin-left: 8px; height: 26px; line-height: 24px; padding: 0 10px; font-weight: bold; background: linear-gradient(135deg, #ff9c00, #ff6a00); border-color: #ff6a00; color: #fff;">
+                            <bk-icon type="data-shape" style="margin-right: 4px;"></bk-icon>⚡ 智能规划
+                        </bk-button>
+
+                        <bk-button size="small" theme="success" @click="openCourseCoverDialog" style="margin-left: 8px; height: 26px; line-height: 24px; padding: 0 10px; font-weight: bold; background: linear-gradient(135deg, #10b981, #059669); border-color: #059669; color: #fff;">
+                            <bk-icon type="image" style="margin-right: 4px;"></bk-icon>🎨 课程封面
+                        </bk-button>
+
                         <bk-dropdown-menu align="left" style="margin-left: 8px;">
                             <template slot="dropdown-trigger">
                                 <bk-button size="small" :outline="true" style="height: 26px; line-height: 24px; padding: 0 8px;">更多操作 <bk-icon type="angle-down"></bk-icon></bk-button>
                             </template>
                             <ul class="bk-dropdown-list" slot="dropdown-content">
+                                <li><a href="javascript:;" @click="openCourseCoverDialog"><bk-icon type="image" style="margin-right: 6px; color: #10b981;"></bk-icon>🎨 课程封面制作与生成</a></li>
+                                <li><a href="javascript:;" @click="openAiPlanDialog"><bk-icon type="data-shape" style="margin-right: 6px; color: #ff9c00;"></bk-icon>⚡ 智能规划</a></li>
+                                <li><a href="javascript:;" @click="openPromptManager"><bk-icon type="cog" style="margin-right: 6px;"></bk-icon>提示词模板管理</a></li>
+                                <li><a href="javascript:;" @click="openAiSettings"><bk-icon type="key" style="margin-right: 6px;"></bk-icon>模型与 API 设置</a></li>
                                 <li><a href="javascript:;" @click="exampleSetting1.primary.visible = true"><bk-icon type="magic" style="margin-right: 6px;"></bk-icon>自动匹配修改</a></li>
                                 <li><a href="javascript:;" @click="openTidyModal"><bk-icon type="folder-open" style="margin-right: 6px;"></bk-icon>整理分类文件夹</a></li>
                             </ul>
@@ -1133,6 +1145,631 @@
                 </div>
             </div>
         </bk-dialog>
+
+        <!-- 6. 智能规划发起弹窗 -->
+        <bk-dialog v-model="aiPlanDialogVisible"
+            title="⚡ 智能批量规划"
+            :width="780"
+            :mask-close="false"
+            :header-position="'left'">
+            <div class="ai-plan-dialog-body" v-if="aiPlanDialogVisible">
+                <!-- 目标路径提示 -->
+                <div class="ai-plan-target-banner">
+                    <span class="target-title"><bk-icon type="folder-open" style="margin-right: 4px;"></bk-icon>目标目录：</span>
+                    <span class="target-path" :title="filePath">{{ filePath || '未选择目录' }}</span>
+                    <span class="target-count" v-if="aiPlanForm.scope === 'selected'">（已勾选 {{ tableSelectedRows.length }} 首）</span>
+                    <span class="target-count" v-else>（当前目录共 {{ folderMusicTotal }} 首）</span>
+                </div>
+
+                <!-- 模式选择卡片 -->
+                <div class="ai-section">
+                    <div class="ai-section-title">选择规划模式：</div>
+                    <div class="ai-mode-cards">
+                        <div class="ai-mode-card"
+                            :class="{ 'mode-active': aiPlanForm.mode === 'course' }"
+                            @click="handleAiModeChange('course')">
+                            <div class="mode-header">
+                                <span class="mode-icon">📚</span>
+                                <span class="mode-name">得到课程 / 知识专栏 / 有声书</span>
+                                <span class="mode-badge" v-if="aiPlanForm.mode === 'course'">当前激活</span>
+                            </div>
+                            <div class="mode-desc">
+                                自动从目录名智能解析讲师与专栏名，按序补全2位音轨号（00, 01...），剥离前置序号及期号广告，自动关联并内嵌本地 cover.jpg 封面。
+                            </div>
+                        </div>
+
+                        <div class="ai-mode-card"
+                            :class="{ 'mode-active': aiPlanForm.mode === 'music' }"
+                            @click="handleAiModeChange('music')">
+                            <div class="mode-header">
+                                <span class="mode-icon">🎵</span>
+                                <span class="mode-name">流行音乐 / 专辑歌曲</span>
+                                <span class="mode-badge" v-if="aiPlanForm.mode === 'music'">当前激活</span>
+                            </div>
+                            <div class="mode-desc">
+                                自动化剥离广告字符、无用前后缀序号，聚合多音源智能比对检索官方歌曲、歌手、专辑与正规音轨号，生成高质打标方案。
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 作用范围 -->
+                <div class="ai-section" style="margin-top: 14px;">
+                    <div class="ai-section-title">应用范围：</div>
+                    <bk-radio-group v-model="aiPlanForm.scope">
+                        <bk-radio value="all">当前文件夹全部歌曲 (共 {{ folderMusicTotal }} 首)</bk-radio>
+                        <bk-radio value="selected" :disabled="tableSelectedRows.length === 0" style="margin-left: 20px;">
+                            仅针对当前已选中的歌曲 (已选 {{ tableSelectedRows.length }} 首)
+                        </bk-radio>
+                    </bk-radio-group>
+                </div>
+
+                <!-- 提示词模板绑定 -->
+                <div class="ai-section" style="margin-top: 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <div class="ai-section-title" style="margin-bottom: 0;">提示词模板：</div>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <a href="javascript:;" @click="openPromptManager" style="font-size: 12px; color: #3a84ff;">
+                                <bk-icon type="cog"></bk-icon> 管理模板库
+                            </a>
+                            <a href="javascript:;" @click="aiPlanForm.showCustomPrompt = !aiPlanForm.showCustomPrompt" style="font-size: 12px; color: #63656e;">
+                                {{ aiPlanForm.showCustomPrompt ? '收起提示词细节' : '展开/微调本次提示词' }}
+                            </a>
+                        </div>
+                    </div>
+                    <select v-model="aiPlanForm.templateId" @change="handleAiTemplateChange(aiPlanForm.templateId)" class="ai-template-select">
+                        <option v-for="itemTpl in currentModeTemplates" :key="itemTpl.id" :value="itemTpl.id">
+                            {{ itemTpl.name }} {{ itemTpl.isDefault ? '（默认预设）' : '' }}
+                        </option>
+                    </select>
+                </div>
+
+                <!-- 展开编辑提示词 -->
+                <div v-if="aiPlanForm.showCustomPrompt" class="ai-custom-prompt-wrap">
+                    <div style="font-size: 12px; color: #63656e; margin-bottom: 4px;">微调规划要求（支持自然语言补充特殊规则）：</div>
+                    <textarea
+                        v-model="aiPlanForm.userPrompt"
+                        rows="4"
+                        class="ai-prompt-textarea"
+                        placeholder="输入本次规划的特定指示，如：跳过发刊词，将作者统一设为XXX...">
+                    </textarea>
+                </div>
+
+                <!-- 执行引擎与大模型状态指示条 -->
+                <div class="ai-engine-banner">
+                    <div class="engine-info">
+                        <template v-if="aiConfig && (aiConfig.model || aiConfig.apiKey)">
+                            <span class="engine-status engine-llm">🤖 大模型增强模式</span>
+                            <span class="engine-model-tag">{{ aiConfig.model || 'gpt-4o-mini' }}</span>
+                            <span class="engine-tip">（规则初筛 + LLM 语义纠错）</span>
+                        </template>
+                        <template v-else>
+                            <span class="engine-status engine-local">⚡ 极速本地规则引擎</span>
+                            <span class="engine-tip">（零网络依赖 / 毫秒级生成 / 零费用）</span>
+                        </template>
+                    </div>
+                    <a href="javascript:;" @click="openAiSettings" class="engine-config-link">
+                        <bk-icon type="key"></bk-icon> {{ (aiConfig && (aiConfig.apiKey || aiConfig.model)) ? '修改配置' : '配置模型 API' }}
+                    </a>
+                </div>
+            </div>
+            <template slot="footer">
+                <div style="display: flex; justify-content: flex-end; align-items: center; width: 100%;">
+                    <bk-button @click="aiPlanDialogVisible = false" style="margin-right: 10px;">取消</bk-button>
+                    <bk-button
+                        theme="primary"
+                        :loading="isAiPlanning"
+                        :disabled="!filePath || (aiPlanForm.scope === 'selected' && tableSelectedRows.length === 0)"
+                        @click="startAiPlan">
+                        <bk-icon type="data-shape" style="margin-right: 4px;" v-if="!isAiPlanning"></bk-icon>
+                        {{ isAiPlanning ? '正在分析规划中...' : '开始智能规划' }}
+                    </bk-button>
+                </div>
+            </template>
+        </bk-dialog>
+
+        <!-- 7. 规划结果审查与差异确认弹窗 (Human-in-the-Loop) -->
+        <bk-dialog v-model="planReviewDialogVisible"
+            title="📋 智能规划结果审查与确认"
+            :width="1180"
+            :mask-close="false"
+            :header-position="'left'">
+            <div class="plan-review-body" v-if="planReviewDialogVisible">
+                <!-- 顶部信息摘要条 -->
+                <div class="plan-summary-bar">
+                    <div class="summary-left">
+                        <div class="summary-meta-item">
+                            <span class="meta-label">目录：</span>
+                            <span class="meta-val" :title="aiPlanResult.dir_path">{{ aiPlanResult.dir_path }}</span>
+                        </div>
+                        <div class="summary-meta-item" v-if="(aiPlanResult.summary && aiPlanResult.summary.detected_album) || (aiPlanResult.course_info && aiPlanResult.course_info.course_title)">
+                            <span class="meta-label">识别专辑/专栏：</span>
+                            <span class="meta-val highlight">{{ (aiPlanResult.summary && aiPlanResult.summary.detected_album) || (aiPlanResult.course_info && aiPlanResult.course_info.course_title) }}</span>
+                            <span class="meta-sub" v-if="(aiPlanResult.summary && aiPlanResult.summary.detected_artist) || (aiPlanResult.course_info && aiPlanResult.course_info.author)">（讲师: {{ (aiPlanResult.summary && aiPlanResult.summary.detected_artist) || (aiPlanResult.course_info && aiPlanResult.course_info.author) }}）</span>
+                        </div>
+                        <div class="summary-meta-item" v-if="(aiPlanResult.summary && aiPlanResult.summary.detected_cover) || aiPlanResult.album_cover_path">
+                            <span class="meta-badge badge-cover">🖼️ 发现本地封面: cover.jpg</span>
+                        </div>
+                    </div>
+                    <div class="summary-right">
+                        <div class="summary-stat-pill">
+                            已勾选 <strong>{{ planReviewSelectedCount }}</strong> / {{ planReviewItems.length }} 首
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 快捷操作与筛选栏 -->
+                <div class="plan-toolbar-bar">
+                    <div class="plan-tools-left">
+                        <bk-checkbox :value="isAllPlanReviewSelected" @change="togglePlanSelectAll" style="margin-right: 12px;">
+                            全选当前列表
+                        </bk-checkbox>
+                        <span class="toolbar-sep">|</span>
+                        <span class="filter-label">视图筛选：</span>
+                        <bk-radio-group v-model="planReviewFilter" size="small">
+                            <bk-radio-button value="all">全部 ({{ planReviewItems.length }})</bk-radio-button>
+                            <bk-radio-button value="changed">仅看有改动 ({{ changedPlanCount }})</bk-radio-button>
+                            <bk-radio-button value="low_conf">低置信度/待注意 ({{ lowConfCount }})</bk-radio-button>
+                        </bk-radio-group>
+                    </div>
+                    <div class="plan-tools-right">
+                        <bk-input
+                            type="text"
+                            size="small"
+                            v-model="planReviewSearch"
+                            placeholder="按文件名或标题过滤..."
+                            :clearable="true"
+                            style="width: 220px;">
+                        </bk-input>
+                    </div>
+                </div>
+
+                <!-- 差异审查对比表格 -->
+                <div class="plan-table-wrap">
+                    <table class="plan-diff-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 44px; text-align: center;">选择</th>
+                                <th style="width: 65px; text-align: center;">音轨号</th>
+                                <th style="width: 270px;">规划标题 (Title)</th>
+                                <th style="width: 140px;">艺术家 (Artist)</th>
+                                <th style="width: 160px;">专辑 (Album)</th>
+                                <th style="width: 90px; text-align: center;">封面</th>
+                                <th style="width: 160px;">规划依据 / 清理项</th>
+                                <th style="width: 65px; text-align: center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="item in planReviewItemsFiltered" :key="item.filename" :class="{ 'row-unselected': !item.selected, 'row-edited': item.isEdited }">
+                                <!-- Checkbox -->
+                                <td style="text-align: center;">
+                                    <bk-checkbox v-model="item.selected"></bk-checkbox>
+                                </td>
+                                <!-- Tracknumber -->
+                                <td style="text-align: center;">
+                                    <input
+                                        v-model="item.tracknumber"
+                                        @input="item.isEdited = true"
+                                        class="plan-cell-input plan-track-input"
+                                        placeholder="01" />
+                                </td>
+                                <!-- Title (with original title diff hint) -->
+                                <td>
+                                    <div class="plan-title-col">
+                                        <input
+                                            v-model="item.title"
+                                            @input="item.isEdited = true"
+                                            class="plan-cell-input plan-title-input" />
+                                        <div class="plan-orig-hint" v-if="item.original && item.original.title && item.original.title !== item.title" :title="'原标题: ' + item.original.title">
+                                            原: {{ item.original.title }}
+                                        </div>
+                                        <div class="plan-file-hint" :title="item.filename">
+                                            📄 {{ item.filename }}
+                                        </div>
+                                    </div>
+                                </td>
+                                <!-- Artist -->
+                                <td>
+                                    <input
+                                        v-model="item.artist"
+                                        @input="item.isEdited = true"
+                                        class="plan-cell-input"
+                                        placeholder="艺术家" />
+                                </td>
+                                <!-- Album -->
+                                <td>
+                                    <input
+                                        v-model="item.album"
+                                        @input="item.isEdited = true"
+                                        class="plan-cell-input"
+                                        placeholder="专辑名" />
+                                </td>
+                                <!-- Cover -->
+                                <td style="text-align: center;">
+                                    <span v-if="item.album_img" class="badge-cover-yes" title="内嵌本地 cover.jpg">
+                                        cover.jpg
+                                    </span>
+                                    <span v-else class="badge-cover-none">无</span>
+                                </td>
+                                <!-- Reason & Cleanups -->
+                                <td>
+                                    <div class="plan-cleanups-wrap">
+                                        <div class="conf-badge-row">
+                                            <span class="conf-tag" :class="getConfidenceClass(item.confidence)">
+                                                {{ Math.round((item.confidence || 1) * 100) }}% 置信
+                                            </span>
+                                        </div>
+                                        <div class="cleanup-pills" v-if="item.cleanups && item.cleanups.length">
+                                            <span class="cleanup-pill" v-for="(c, cIdx) in item.cleanups" :key="cIdx" :title="c">{{ c }}</span>
+                                        </div>
+                                        <div class="plan-reason-text" v-else-if="item.reason" :title="item.reason">
+                                            {{ item.reason }}
+                                        </div>
+                                    </div>
+                                </td>
+                                <!-- Action -->
+                                <td style="text-align: center;">
+                                    <bk-button size="small" :text="true" @click="resetPlanItem(item)" title="还原为原音频标签">
+                                        还原
+                                    </bk-button>
+                                </td>
+                            </tr>
+                            <tr v-if="planReviewItemsFiltered.length === 0">
+                                <td colspan="8" style="text-align: center; color: #979ba5; padding: 30px 0;">
+                                    没有匹配筛选条件的规划项
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <template slot="footer">
+                <div class="plan-review-footer">
+                    <div class="review-footer-left" style="display: flex; align-items: center;">
+                        <span>准备提交 <strong>{{ planReviewSelectedCount }}</strong> 首歌曲修改至后台任务中心</span>
+                        <bk-button size="small" theme="success" :outline="true" @click="openCourseCoverDialog" style="margin-left: 12px; height: 26px; line-height: 24px;">
+                            <bk-icon type="image" style="margin-right: 4px;"></bk-icon>🎨 制作专属课程封面
+                        </bk-button>
+                    </div>
+                    <div class="review-footer-right">
+                        <bk-button @click="planReviewDialogVisible = false" style="margin-right: 10px;">放弃本次规划</bk-button>
+                        <bk-button
+                            theme="primary"
+                            :loading="isAiSubmitting"
+                            :disabled="planReviewSelectedCount === 0"
+                            @click="submitAiPlanExecution">
+                            <bk-icon type="check" style="margin-right: 4px;" v-if="!isAiSubmitting"></bk-icon>
+                            一键提交至任务中心并执行 ({{ planReviewSelectedCount }} 首)
+                        </bk-button>
+                    </div>
+                </div>
+            </template>
+        </bk-dialog>
+
+        <!-- 8. 提示词模板管理弹窗 -->
+        <bk-dialog v-model="promptManagerVisible"
+            title="⚙️ 提示词模板管理 (模式绑定与预设)"
+            :width="880"
+            :mask-close="false"
+            :header-position="'left'">
+            <div class="prompt-manager-body" v-if="promptManagerVisible">
+                <!-- 左侧模板列表 -->
+                <div class="pm-left-col">
+                    <div class="pm-list-header">
+                        <span>模板列表 ({{ promptTemplates.length }})</span>
+                        <bk-button size="small" theme="primary" :text="true" @click="addNewPrompt">
+                            <bk-icon type="plus"></bk-icon> 新建
+                        </bk-button>
+                    </div>
+                    <div class="pm-list-scroll">
+                        <div v-for="pTpl in promptTemplates" :key="pTpl.id"
+                            class="pm-tpl-item"
+                            :class="{ 'tpl-active': editingPrompt.id === pTpl.id }"
+                            @click="selectPromptToEdit(pTpl)">
+                            <div class="pm-item-top">
+                                <span class="pm-tpl-name">{{ pTpl.name }}</span>
+                                <span class="pm-mode-tag" :class="pTpl.mode">{{ pTpl.mode === 'course' ? '课程' : '音乐' }}</span>
+                            </div>
+                            <div class="pm-item-bottom">
+                                <span v-if="pTpl.isDefault" class="pm-default-badge">★ 默认预设</span>
+                                <span v-if="pTpl.isBuiltin" class="pm-builtin-badge">系统预置</span>
+                                <span v-else class="pm-custom-badge">自定义</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="pm-list-footer">
+                        <bk-button size="small" :outline="true" @click="resetPromptDefaults" style="width: 100%;">
+                            恢复所有系统默认预设
+                        </bk-button>
+                    </div>
+                </div>
+
+                <!-- 右侧编辑表单 -->
+                <div class="pm-right-col" v-if="editingPrompt">
+                    <div class="pm-form-row">
+                        <label class="pm-label">模板名称：</label>
+                        <bk-input v-model="editingPrompt.name" placeholder="请输入模板名称" style="width: 100%;"></bk-input>
+                    </div>
+                    <div class="pm-form-row" style="display: flex; gap: 20px; align-items: center;">
+                        <div style="flex: 1;">
+                            <label class="pm-label">适用模式：</label>
+                            <bk-radio-group v-model="editingPrompt.mode">
+                                <bk-radio value="course">得到课程/有声书</bk-radio>
+                                <bk-radio value="music">流行音乐</bk-radio>
+                            </bk-radio-group>
+                        </div>
+                        <div style="flex: 1; padding-top: 18px;">
+                            <bk-checkbox v-model="editingPrompt.isDefault">
+                                设为该模式的默认推荐模板
+                            </bk-checkbox>
+                        </div>
+                    </div>
+                    <div class="pm-form-row">
+                        <label class="pm-label">系统提示词 (System Prompt)：</label>
+                        <textarea v-model="editingPrompt.systemPrompt" rows="3" class="pm-textarea" placeholder="输入大模型系统角色设定..."></textarea>
+                    </div>
+                    <div class="pm-form-row">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <label class="pm-label" style="margin-bottom: 0;">用户提示词 (User Prompt) 模板：</label>
+                            <span style="font-size: 11px; color: #979ba5;">可用变量占位符：{dir_name}, {files}</span>
+                        </div>
+                        <textarea v-model="editingPrompt.userPrompt" rows="7" class="pm-textarea" placeholder="输入详细的规划指导要求..."></textarea>
+                    </div>
+                    <div class="pm-actions-bar">
+                        <bk-button
+                            v-if="!editingPrompt.isBuiltin"
+                            theme="danger"
+                            size="small"
+                            :outline="true"
+                            @click="deleteCurrentPrompt">
+                            删除此模板
+                        </bk-button>
+                        <span v-else style="font-size: 12px; color: #979ba5;">系统内置模板不可删除，但可微调保存</span>
+                        <bk-button theme="primary" size="small" @click="saveEditingPrompt" style="margin-left: auto;">
+                            保存模板修改
+                        </bk-button>
+                    </div>
+                </div>
+            </div>
+            <template slot="footer">
+                <bk-button theme="default" @click="promptManagerVisible = false">关闭</bk-button>
+            </template>
+        </bk-dialog>
+
+        <!-- 9. 模型与 API 密钥设置弹窗 -->
+        <bk-dialog v-model="aiSettingsVisible"
+            title="🔑 模型与 API 密钥配置 (OpenAI 兼容)"
+            :width="640"
+            :mask-close="false"
+            :header-position="'left'">
+            <div class="ai-settings-body" v-if="aiSettingsVisible">
+                <div class="ai-settings-notice">
+                    <bk-icon type="info-circle-shape" style="margin-right: 6px; color: #3a84ff;"></bk-icon>
+                    支持任何 OpenAI 兼容协议接口（如 OpenAI, DeepSeek, Moonshot, 通义千问, Ollama, OneAPI 等）。若留空，系统自动使用极速纯本地规则引擎。
+                </div>
+
+                <div class="ai-setting-row">
+                    <label class="ai-setting-label">API 基础地址 (Base URL)：</label>
+                    <bk-input v-model="aiConfig.baseUrl" placeholder="https://api.openai.com/v1 或 https://api.deepseek.com/v1"></bk-input>
+                    <div class="ai-setting-tip">本地 Ollama 可填：<code>http://localhost:11434/v1</code> 或 <code>http://host.docker.internal:11434/v1</code></div>
+                </div>
+
+                <div class="ai-setting-row">
+                    <label class="ai-setting-label">API 密钥 (API Key)：</label>
+                    <bk-input type="password" v-model="aiConfig.apiKey" placeholder="sk-... (Ollama等本地模型可留空)" :clearable="true"></bk-input>
+                    <div class="ai-setting-tip">API Key 仅安全存储于您浏览器的本地 localStorage 中。本地部署模型（如 Ollama）可直接留空。</div>
+                </div>
+
+                <div class="ai-setting-row">
+                    <label class="ai-setting-label">模型名称 (Model Name)：</label>
+                    <bk-input v-model="aiConfig.model" placeholder="例如：qwen3.8:27b-mlx, gpt-4o-mini, deepseek-chat"></bk-input>
+                </div>
+
+                <div class="ai-setting-row">
+                    <label class="ai-setting-label">温度参数 (Temperature)：</label>
+                    <bk-input type="number" v-model.number="aiConfig.temperature" :min="0" :max="1" :step="0.1" style="width: 140px;"></bk-input>
+                    <span class="ai-setting-tip" style="margin-left: 10px; display: inline;">推荐 0.2（输出更稳定规范）</span>
+                </div>
+
+                <!-- 连通性测试结果面板 -->
+                <div v-if="aiTestStatus.tested" class="ai-test-result-box" :class="aiTestStatus.success ? 'test-success' : 'test-failed'">
+                    <div class="result-header">
+                        <bk-icon :type="aiTestStatus.success ? 'check-circle-shape' : 'close-circle-shape'" style="margin-right: 6px;"></bk-icon>
+                        <span class="result-title">{{ aiTestStatus.success ? '连通性测试通过！' : '连通性测试未通过' }}</span>
+                        <span v-if="aiTestStatus.latency" class="result-latency">耗时: {{ aiTestStatus.latency }}ms</span>
+                    </div>
+                    <div class="result-message">{{ aiTestStatus.message }}</div>
+                    <div v-if="aiTestStatus.reply" class="result-reply">模型响应预览：<code>{{ aiTestStatus.reply }}</code></div>
+                </div>
+            </div>
+            <template slot="footer">
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <bk-button theme="danger" :text="true" @click="clearAiConfig">
+                        清空并使用纯本地引擎
+                    </bk-button>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <bk-button
+                            theme="default"
+                            :loading="isTestingAiConnection"
+                            :disabled="!aiConfig.model"
+                            @click="testAiConnection"
+                            title="向大模型发送探测请求，验证网络连通性及模型推理可用性">
+                            <bk-icon type="wifi" style="margin-right: 4px;" v-if="!isTestingAiConnection"></bk-icon>
+                            测试连通性与可用性
+                        </bk-button>
+                        <bk-button @click="aiSettingsVisible = false">取消</bk-button>
+                        <bk-button theme="primary" @click="saveAiConfig">保存设置</bk-button>
+                    </div>
+                </div>
+            </template>
+        </bk-dialog>
+
+        <!-- 9. 课程专属封面智能生成与排版弹窗 -->
+        <bk-dialog v-model="courseCoverDialogVisible"
+            title="🎨 课程专属封面制作与智能生成"
+            :width="960"
+            :mask-close="false"
+            :header-position="'left'">
+            <div class="course-cover-dialog-body" v-if="courseCoverDialogVisible">
+                <!-- 左侧配置面板 -->
+                <div class="cover-left-pane">
+                    <div class="form-group-item">
+                        <label class="form-label">当前课程目录：</label>
+                        <input type="text" class="bk-form-input" :value="filePath" readonly style="background: #f5f7fa; color: #63656e;" />
+                    </div>
+
+                    <div class="form-group-row">
+                        <div class="form-group-item" style="flex: 2;">
+                            <label class="form-label">课程主标题：<span style="color: #ea3636;">*</span></label>
+                            <input type="text" class="bk-form-input" v-model="coverForm.title" placeholder="例如：薛兆丰的经济学课" />
+                        </div>
+                        <div class="form-group-item" style="flex: 1; margin-left: 10px;">
+                            <label class="form-label">主讲人 / 导师：</label>
+                            <input type="text" class="bk-form-input" v-model="coverForm.author" placeholder="例如：薛兆丰" />
+                        </div>
+                    </div>
+
+                    <div class="form-group-row">
+                        <div class="form-group-item" style="flex: 1;">
+                            <label class="form-label">生图渲染引擎：</label>
+                            <select v-model="coverForm.engine" class="bk-form-select">
+                                <option value="comfyui">ComfyUI AI 智能绘画 (MOSS-Image)</option>
+                                <option value="geometric">极速几何美学引擎 (0等待 / 无需GPU)</option>
+                            </select>
+                        </div>
+                        <div class="form-group-item" style="flex: 1; margin-left: 10px;">
+                            <label class="form-label">封面排版版式：</label>
+                            <select v-model="coverForm.layout" class="bk-form-select">
+                                <option value="dedao_clean">🌟 官方极简专栏风（《硅谷来信》同款·推荐）</option>
+                                <option value="badge_master">🎖️ 大师课典藏徽标风（带顶部徽章与下划线）</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group-row">
+                        <div class="form-group-item" style="flex: 1;" v-if="coverForm.layout === 'badge_master'">
+                            <label class="form-label">顶部徽章 / 分类：</label>
+                            <input type="text" class="bk-form-input" v-model="coverForm.category" placeholder="得到课程 / 精品专栏 / 大师课" />
+                        </div>
+                        <div class="form-group-item" style="flex: 1;" :style="coverForm.layout === 'badge_master' ? 'margin-left: 10px;' : ''">
+                            <label class="form-label">标题字号与视觉冲击力：</label>
+                            <select v-model="coverForm.font_size" class="bk-form-select">
+                                <option value="auto">⚡ 智能自适应（默认·自动匹配 120~150px 巨幅标题）</option>
+                                <option value="150">🔥 巨幅满格 (150px - 硅谷来信官方同款特大号)</option>
+                                <option value="130">✨ 大号饱满 (130px - 适合5~7字)</option>
+                                <option value="110">🎯 中号沉稳 (110px - 适合8~10字长标题)</option>
+                                <option value="90">🍃 精巧标准 (90px)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div v-if="coverForm.engine === 'comfyui'">
+                        <div class="form-group-item">
+                            <label class="form-label">视觉风格预设 / 提示词：</label>
+                            <div class="preset-pills">
+                                <span class="pill-tag" @click="setCoverPreset('科技电路')">⚡ 科技电路 (硅谷来信)</span>
+                                <span class="pill-tag" @click="setCoverPreset('极简商务')">极简商务</span>
+                                <span class="pill-tag" @click="setCoverPreset('暖色几何')">暖色几何</span>
+                                <span class="pill-tag" @click="setCoverPreset('深邃探索')">深邃探索</span>
+                                <span class="pill-tag" @click="setCoverPreset('自然治愈')">自然治愈</span>
+                            </div>
+                            <textarea class="bk-form-textarea" v-model="coverForm.prompt" rows="3" placeholder="描述希望的背景画面（建议简述意象或色调），系统将自动补充 8k 渲染与极简排版画质词..."></textarea>
+                        </div>
+                        <div class="form-group-item">
+                            <label class="form-label">生图渲染精度与速度：</label>
+                            <select v-model="coverForm.quality" class="bk-form-select">
+                                <option value="fast">⚡ 极速出图 (768px 底图 / 12步 / 约40~70秒，推荐)</option>
+                                <option value="hd">💎 超清质感 (1024px 底图 / 16步 / 约150~180秒)</option>
+                            </select>
+                        </div>
+                        <div class="form-group-item">
+                            <label class="form-label" style="display: flex; justify-content: space-between; align-items: center;">
+                                <span>ComfyUI 服务地址：</span>
+                                <bk-button size="small" :loading="isTestingComfyui" @click="handleTestComfyui" style="padding: 0 8px; height: 22px; font-size: 11px;">
+                                    🔍 测试连通性
+                                </bk-button>
+                            </label>
+                            <input type="text" class="bk-form-input" v-model="coverForm.comfyui_url" placeholder="http://host.docker.internal:8188 或 http://192.168.199.12:8188" />
+                            <div v-if="comfyuiTestResult" :style="{ fontSize: '11px', marginTop: '4px', lineHeight: '1.4', color: comfyuiTestResult.success ? '#2dcb56' : '#ea3636' }">
+                                {{ comfyuiTestResult.msg }}
+                            </div>
+                            <span v-else style="font-size: 11px; color: #979ba5; margin-top: 2px;">本机 Docker 访问宿主机填 http://host.docker.internal:8188；局域网 Windows 机器填 http://192.168.199.12:8188</span>
+                        </div>
+                    </div>
+
+                    <div v-if="coverForm.engine === 'geometric'">
+                        <div class="form-group-item">
+                            <label class="form-label">几何配色主题：</label>
+                            <select v-model="coverForm.style" class="bk-form-select">
+                                <option value="amber_dark">沉稳暗金 (Amber Dark - 得到经典质感)</option>
+                                <option value="deep_blue">理性格调 (Deep Blue - 科技与通识)</option>
+                                <option value="emerald">生命翠绿 (Emerald - 医疗与成长)</option>
+                                <option value="crimson">热烈赤红 (Crimson - 商业与历史)</option>
+                                <option value="purple">人文紫调 (Purple - 哲学与艺术)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 15px;">
+                        <bk-button theme="primary" :loading="isGeneratingCover" @click="handleGenerateCover" style="width: 100%; height: 38px; font-weight: bold;">
+                            <bk-icon type="magic" style="margin-right: 4px;" v-if="!isGeneratingCover"></bk-icon>
+                            {{ isGeneratingCover ? ('正在绘制全新封面 (已耗时 ' + generateCostSeconds + 's)...') : (generatedCoverBase64 ? '🔄 不满意？重新生成一张' : '⚡ 立即生成专属封面预览') }}
+                        </bk-button>
+                    </div>
+                </div>
+
+                <!-- 右侧预览面板 -->
+                <div class="cover-right-pane">
+                    <div class="cover-preview-card">
+                        <div class="cover-img-box" v-if="generatedCoverBase64 || isGeneratingCover">
+                            <div class="cover-loading-overlay" v-if="isGeneratingCover">
+                                <bk-icon type="circle-2-1" class="spin-icon" style="font-size: 36px; color: #3a84ff; margin-bottom: 12px;"></bk-icon>
+                                <span style="font-size: 13px; font-weight: bold; color: #313238;">正在渲染全新封面...</span>
+                                <span style="font-size: 11px; color: #63656e; margin-top: 4px;">已耗时 {{ generateCostSeconds }} 秒 (已中断旧任务)</span>
+                            </div>
+                            <img v-if="generatedCoverBase64" :src="generatedCoverBase64" alt="课程封面预览" />
+                        </div>
+                        <div class="cover-empty-box" v-else>
+                            <bk-icon type="image" style="font-size: 48px; color: #c4c6cc; margin-bottom: 12px;"></bk-icon>
+                            <p style="color: #63656e; font-size: 14px; font-weight: bold; margin-bottom: 6px;">等待生成封面预览</p>
+                            <span style="color: #979ba5; font-size: 12px; text-align: center; line-height: 1.5;">
+                                点击左侧「立即生成」按钮查看渲染效果<br />
+                                自动叠加得到级专业版式、折行标题与金色徽标
+                            </span>
+                        </div>
+
+                        <div class="cover-meta-bar" v-if="generatedCoverMeta">
+                            <span>引擎：<strong>{{ generatedCoverMeta.source }}</strong></span>
+                            <span style="margin-left: 10px;">耗时：<strong>{{ generatedCoverMeta.cost_sec }}s</strong></span>
+                            <span style="margin-left: 10px;">分辨率：<strong>1024 × 1024</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <template slot="footer">
+                <div class="cover-dialog-footer">
+                    <div class="cover-footer-left">
+                        <label style="cursor: pointer; display: inline-flex; align-items: center; font-size: 13px; color: #63656e;">
+                            <input type="checkbox" v-model="coverForm.embed_to_files" style="margin-right: 6px;" />
+                            同时将封面内嵌写入该目录下所有音频标签 (ID3 / FLAC / MP4)
+                        </label>
+                    </div>
+                    <div class="cover-footer-right">
+                        <bk-button @click="courseCoverDialogVisible = false" style="margin-right: 10px;">关闭</bk-button>
+                        <bk-button
+                            theme="success"
+                            :loading="isSavingCover"
+                            :disabled="!generatedCoverBase64"
+                            @click="handleApplyCover">
+                            <bk-icon type="check" style="margin-right: 4px;" v-if="!isSavingCover"></bk-icon>
+                            保存 cover.jpg 并应用到课程
+                        </bk-button>
+                    </div>
+                </div>
+            </template>
+        </bk-dialog>
     </div>
 </template>
 <script>
@@ -1344,6 +1981,80 @@
                     wait: 0,
                     batches: []
                 },
+                // AI 智能规划 Agent 状态
+                aiPlanDialogVisible: false,
+                isAiPlanning: false,
+                planReviewDialogVisible: false,
+                isAiSubmitting: false,
+                promptManagerVisible: false,
+                aiSettingsVisible: false,
+                isTestingAiConnection: false,
+                aiTestStatus: {
+                    tested: false,
+                    success: false,
+                    message: '',
+                    latency: 0,
+                    reply: ''
+                },
+                // 课程封面制作与智能生成状态
+                courseCoverDialogVisible: false,
+                isGeneratingCover: false,
+                isSavingCover: false,
+                isTestingComfyui: false,
+                comfyuiTestResult: null,
+                generateCostSeconds: 0,
+                generateTimer: null,
+                generatedCoverBase64: '',
+                generatedCoverMeta: null,
+                coverForm: {
+                    title: '',
+                    author: '',
+                    category: '得到课程',
+                    engine: 'comfyui',
+                    quality: 'fast',
+                    layout: 'dedao_clean',
+                    font_size: 'auto',
+                    comfyui_url: localStorage.getItem('mtw_comfyui_url') || 'http://host.docker.internal:8188',
+                    style: 'amber_dark',
+                    prompt: 'dark navy electronic PCB circuit board background, glowing cyan neon and brushed gold copper conductive tracks, motherboard microchips, a minimalist outline envelope icon made of circuit lines at top center, clean empty dark negative space in the center, radial dark vignette, sleek modern tech graphic design, vector aesthetic, 8k, masterpiece, no text',
+                    embed_to_files: true
+                },
+                aiPlanForm: {
+                    mode: 'course',
+                    scope: 'all',
+                    templateId: 'tpl_course_default',
+                    systemPrompt: '',
+                    userPrompt: '',
+                    showCustomPrompt: false
+                },
+                promptTemplates: [],
+                editingPrompt: {
+                    id: '',
+                    name: '',
+                    mode: 'course',
+                    isDefault: false,
+                    isBuiltin: false,
+                    systemPrompt: '',
+                    userPrompt: ''
+                },
+                aiConfig: {
+                    apiKey: '',
+                    baseUrl: 'https://api.openai.com/v1',
+                    model: 'gpt-4o-mini',
+                    temperature: 0.2
+                },
+                aiPlanResult: {
+                    dir_path: '',
+                    mode: '',
+                    total_scanned: 0,
+                    total_planned: 0,
+                    album_cover_path: '',
+                    course_info: null,
+                    plans: []
+                },
+                planReviewItems: [],
+                planReviewFilter: 'all',
+                planReviewSearch: '',
                 // 批量修改与进度跟踪状态
                 batchModalVisible: false,
                 isBatchSubmitting: false,
@@ -1539,6 +2250,48 @@
                 }
                 return `${root}/${firstName}${secondPart}/歌曲文件名.mp3`
             },
+            currentModeTemplates() {
+                if (!this.promptTemplates) return []
+                return this.promptTemplates.filter(t => t.mode === this.aiPlanForm.mode)
+            },
+            planReviewItemsFiltered() {
+                let list = this.planReviewItems || []
+                if (this.planReviewFilter === 'changed') {
+                    list = list.filter(i => {
+                        const orig = i.original || {}
+                        return (orig.title && orig.title !== i.title) ||
+                               (orig.tracknumber && orig.tracknumber !== i.tracknumber) ||
+                               (orig.artist && orig.artist !== i.artist) ||
+                               (orig.album && orig.album !== i.album)
+                    })
+                } else if (this.planReviewFilter === 'low_conf') {
+                    list = list.filter(i => (i.confidence || 1) < 0.9)
+                }
+                if (this.planReviewSearch) {
+                    const q = this.planReviewSearch.trim().toLowerCase()
+                    list = list.filter(i => (i.filename && i.filename.toLowerCase().includes(q)) || (i.title && i.title.toLowerCase().includes(q)))
+                }
+                return list
+            },
+            planReviewSelectedCount() {
+                return (this.planReviewItems || []).filter(i => i.selected).length
+            },
+            isAllPlanReviewSelected() {
+                const list = this.planReviewItemsFiltered
+                return list.length > 0 && list.every(i => i.selected)
+            },
+            changedPlanCount() {
+                return (this.planReviewItems || []).filter(i => {
+                    const orig = i.original || {}
+                    return (orig.title && orig.title !== i.title) ||
+                           (orig.tracknumber && orig.tracknumber !== i.tracknumber) ||
+                           (orig.artist && orig.artist !== i.artist) ||
+                           (orig.album && orig.album !== i.album)
+                }).length
+            },
+            lowConfCount() {
+                return (this.planReviewItems || []).filter(i => (i.confidence || 1) < 0.9).length
+            },
             filePath: {
                 get() {
                     if (this.geFullPath) {
@@ -1598,6 +2351,7 @@
             this.handleSearchFile()
             this.fetchTaskStats()
             this.initEventSource()
+            this.initAiAgentState()
         },
         beforeDestroy() {
             if (this.batchPollTimer) {
@@ -3094,6 +3848,681 @@
                 } catch (e) {
                     return batchStr
                 }
+            },
+            // ==================== AI 智能规划 Agent 方法 ====================
+            initAiAgentState() {
+                // 初始化提示词模板
+                try {
+                    const storedTemplates = localStorage.getItem('mtw_prompt_templates')
+                    if (storedTemplates) {
+                        const parsed = JSON.parse(storedTemplates)
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            this.promptTemplates = parsed
+                        }
+                    }
+                } catch (e) {}
+
+                if (!this.promptTemplates || this.promptTemplates.length === 0) {
+                    this.resetPromptDefaults(false)
+                }
+
+                // 初始化 AI 模型配置
+                try {
+                    const storedAiConfig = localStorage.getItem('mtw_ai_config')
+                    if (storedAiConfig) {
+                        const parsed = JSON.parse(storedAiConfig)
+                        if (parsed && typeof parsed === 'object') {
+                            this.aiConfig = Object.assign({}, this.aiConfig, parsed)
+                        }
+                    }
+                } catch (e) {}
+            },
+            getDefaultPromptTemplates() {
+                return [
+                    {
+                        id: 'tpl_course_default',
+                        name: '得到课程/有声书规范化',
+                        mode: 'course',
+                        isDefault: true,
+                        isBuiltin: true,
+                        systemPrompt: '你是一个专业的音频元数据规范化专家。负责整理知识付费音频与有声书，根据给定的目录名与文件名，分析出规范的标题、作者、专辑和音轨号，去除标题中的期号广告冗余，输出清洗后的标准元数据。',
+                        userPrompt: '当前处理目录：{dir_name}\n请针对以下音频文件列表，规划其标准 ID3 标签。\n文件列表：\n{files}\n\n规划要求：\n1. 标题 (Title)：剥离原文件名中的前置序号（如 01、001 等）、期号（如 00发刊词- -> 发刊词-）以及广告宣传字符。\n2. 艺术家 (Artist)：提取讲师/作者姓名。\n3. 专辑 (Album)：提取课程专栏名称。\n4. 音轨号 (Track)：按原前置顺序编排2位补零数字序号（如 01, 02...，发刊词可编为 00）。\n5. 流派 (Genre)：固定为「有声书」或「知识课程」。'
+                    },
+                    {
+                        id: 'tpl_music_default',
+                        name: '流行音乐元数据规划与清洗',
+                        mode: 'music',
+                        isDefault: true,
+                        isBuiltin: true,
+                        systemPrompt: '你是一个专业的音乐元数据整理专家。负责清洗音乐文件名和标签，去除广告字眼、序号、低质特征，规划精准的歌曲名、歌手名与专辑名。',
+                        userPrompt: '当前处理目录：{dir_name}\n请针对以下音乐文件列表，规划其标准歌曲信息：\n{files}\n\n规划要求：\n1. 剥离广告后缀与脏字符（如「无损下载」、「[DJ版]」等无用标记，保留正式曲名及关键备注）。\n2. 规范歌手与专辑名。'
+                    }
+                ]
+            },
+            resetPromptDefaults(showToast = true) {
+                this.promptTemplates = this.getDefaultPromptTemplates()
+                try {
+                    localStorage.setItem('mtw_prompt_templates', JSON.stringify(this.promptTemplates))
+                } catch (e) {}
+                if (showToast) {
+                    this.$cwMessage('已恢复所有系统预置提示词模板', 'success')
+                }
+                if (this.promptTemplates.length > 0) {
+                    this.selectPromptToEdit(this.promptTemplates[0])
+                }
+            },
+            openAiPlanDialog() {
+                if (!this.filePath) {
+                    this.$cwMessage('请先在左侧选择要规划的音乐文件夹', 'warning')
+                    return
+                }
+
+                // 智能根据目录名称判断推荐模式
+                const pathLower = (this.filePath || '').toLowerCase()
+                let targetMode = 'course'
+                if (pathLower.includes('课程') || pathLower.includes('得到') || pathLower.includes('专栏') || pathLower.includes('有声') || pathLower.includes('讲座')) {
+                    targetMode = 'course'
+                } else if (pathLower.includes('专辑') || pathLower.includes('单曲') || pathLower.includes('精选') || pathLower.includes('歌单')) {
+                    targetMode = 'music'
+                } else {
+                    targetMode = this.aiPlanForm.mode || 'course'
+                }
+
+                this.aiPlanForm.mode = targetMode
+                this.aiPlanForm.scope = this.tableSelectedRows.length > 0 ? 'selected' : 'all'
+                this.handleAiModeChange(targetMode)
+                this.aiPlanDialogVisible = true
+            },
+            handleAiModeChange(mode) {
+                this.aiPlanForm.mode = mode
+                // 查找该模式下的默认推荐模板
+                let matched = this.promptTemplates.find(t => t.mode === mode && t.isDefault)
+                if (!matched) {
+                    matched = this.promptTemplates.find(t => t.mode === mode)
+                }
+                if (matched) {
+                    this.aiPlanForm.templateId = matched.id
+                    this.aiPlanForm.systemPrompt = matched.systemPrompt || ''
+                    this.aiPlanForm.userPrompt = matched.userPrompt || ''
+                }
+            },
+            handleAiTemplateChange(tplId) {
+                const matched = this.promptTemplates.find(t => t.id === tplId)
+                if (matched) {
+                    this.aiPlanForm.systemPrompt = matched.systemPrompt || ''
+                    this.aiPlanForm.userPrompt = matched.userPrompt || ''
+                }
+            },
+            startAiPlan() {
+                if (!this.filePath) {
+                    this.$cwMessage('请先在左侧选择目标文件夹', 'warning')
+                    return
+                }
+
+                this.isAiPlanning = true
+                const files = this.aiPlanForm.scope === 'selected'
+                    ? this.tableSelectedRows.map(r => r.filename).filter(Boolean)
+                    : []
+
+                const payload = {
+                    dir_path: this.filePath,
+                    mode: this.aiPlanForm.mode,
+                    files: files,
+                    system_prompt: this.aiPlanForm.systemPrompt || '',
+                    user_prompt: this.aiPlanForm.userPrompt || '',
+                    ai_config: (this.aiConfig && (this.aiConfig.model || this.aiConfig.apiKey)) ? this.aiConfig : {}
+                }
+
+                this.$api.Task.agentPlan(payload).then(res => {
+                    if (res && res.result) {
+                        this.aiPlanResult = res.data || {}
+                        const plans = this.aiPlanResult.plan || this.aiPlanResult.plans || []
+                        this.planReviewItems = plans.map(p => {
+                            const orig = p.current || p.original || {}
+                            const prop = p.proposed || {}
+                            const fname = p.name || p.filename || prop.name || ''
+                            const confVal = p.confidence === 'high' ? 0.95 : (p.confidence === 'medium' ? 0.75 : (p.confidence === 'low' ? 0.5 : (typeof p.confidence === 'number' ? p.confidence : 1.0)))
+                            return {
+                                filename: fname,
+                                original: {
+                                    title: orig.title || '',
+                                    artist: orig.artist || '',
+                                    album: orig.album || '',
+                                    tracknumber: orig.tracknumber || ''
+                                },
+                                title: prop.title || orig.title || '',
+                                artist: prop.artist || orig.artist || '',
+                                album: prop.album || orig.album || '',
+                                albumartist: prop.albumartist || prop.artist || orig.albumartist || orig.artist || '',
+                                tracknumber: prop.tracknumber !== undefined ? String(prop.tracknumber) : (orig.tracknumber || ''),
+                                discnumber: prop.discnumber !== undefined ? String(prop.discnumber) : (orig.discnumber || '1'),
+                                genre: prop.genre || orig.genre || (this.aiPlanForm.mode === 'course' ? '有声书' : ''),
+                                album_img: prop.album_img || '',
+                                cleanups: p.cleanups || (p.reason ? [p.reason] : []),
+                                confidence: confVal,
+                                reason: p.reason || '',
+                                selected: true,
+                                isEdited: false
+                            }
+                        })
+                        this.aiPlanDialogVisible = false
+                        this.planReviewFilter = 'all'
+                        this.planReviewSearch = ''
+                        this.planReviewDialogVisible = true
+                        this.$cwMessage(`智能规划完成，共生成 ${plans.length} 首歌曲方案，请复核后提交`, 'success')
+                    } else {
+                        this.$cwMessage('规划失败: ' + (res ? res.message : '未知错误'), 'error')
+                    }
+                }).catch(err => {
+                    this.$cwMessage('规划请求出错: ' + err, 'error')
+                }).finally(() => {
+                    this.isAiPlanning = false
+                })
+            },
+            togglePlanSelectAll(val) {
+                const targetState = typeof val === 'boolean' ? val : !this.isAllPlanReviewSelected
+                this.planReviewItemsFiltered.forEach(item => {
+                    item.selected = targetState
+                })
+            },
+            resetPlanItem(item) {
+                if (!item || !item.original) return
+                item.title = item.original.title || ''
+                item.artist = item.original.artist || ''
+                item.album = item.original.album || ''
+                item.tracknumber = item.original.tracknumber || ''
+                item.isEdited = false
+                this.$cwMessage(`已还原 ${item.filename} 为原标签`, 'primary')
+            },
+            getConfidenceClass(conf) {
+                const val = conf !== undefined ? conf : 1
+                if (val >= 0.9) return 'conf-high'
+                if (val >= 0.7) return 'conf-med'
+                return 'conf-low'
+            },
+            submitAiPlanExecution() {
+                const selectedItems = (this.planReviewItems || []).filter(item => item.selected)
+                if (selectedItems.length === 0) {
+                    this.$cwMessage('请至少勾选一首歌曲进行提交', 'warning')
+                    return
+                }
+
+                // 检查是否有歌曲正在处理
+                const activeNames = []
+                for (const item of selectedItems) {
+                    const st = this.batchStatusMap[item.filename]
+                    if (st && (st.state === 'running' || st.state === 'wait')) {
+                        activeNames.push(item.filename)
+                    }
+                }
+                if (activeNames.length > 0) {
+                    const sample = activeNames.slice(0, 3).join('、')
+                    const extra = activeNames.length > 3 ? ` 等共 ${activeNames.length} 首` : ''
+                    this.$cwMessage(`检测到歌曲（${sample}${extra}）正在后台任务队列中，请等待其完成后再提交！`, 'warning')
+                    return
+                }
+
+                const selectData = selectedItems.map(item => ({
+                    name: item.filename,
+                    filename: item.filename,
+                    title: item.title,
+                    artist: item.artist,
+                    album: item.album,
+                    albumartist: item.albumartist || item.artist,
+                    tracknumber: item.tracknumber,
+                    discnumber: item.discnumber,
+                    genre: item.genre,
+                    album_img: item.album_img
+                }))
+
+                // 先标记为 wait 状态
+                selectedItems.forEach(item => {
+                    this.$set(this.batchStatusMap, item.filename, { state: 'wait', extra: '' })
+                })
+
+                this.isAiSubmitting = true
+                this.$api.Task.batchUpdateId3({
+                    file_full_path: this.filePath,
+                    select_data: selectData,
+                    apply_to_all: false,
+                    music_info: {}
+                }).then(res => {
+                    if (res && res.result) {
+                        const batchId = res.data ? res.data.batch : ''
+                        this.startBatchStatusPolling(batchId)
+                        this.$cwMessage(`智能规划任务已成功提交至任务中心（共 ${selectData.length} 首），正在后台并发执行`, 'success')
+                        this.planReviewDialogVisible = false
+                    } else {
+                        this.$cwMessage('批量修改提交失败: ' + (res ? res.message : ''), 'error')
+                        selectedItems.forEach(item => {
+                            this.$delete(this.batchStatusMap, item.filename)
+                        })
+                    }
+                }).catch(err => {
+                    this.$cwMessage('批量修改提交异常: ' + err, 'error')
+                    selectedItems.forEach(item => {
+                        this.$delete(this.batchStatusMap, item.filename)
+                    })
+                }).finally(() => {
+                    this.isAiSubmitting = false
+                })
+            },
+            // ==================== 提示词模板管理 ====================
+            openPromptManager() {
+                if (!this.promptTemplates || this.promptTemplates.length === 0) {
+                    this.resetPromptDefaults(false)
+                }
+                const activeId = this.aiPlanForm.templateId
+                const activeTpl = this.promptTemplates.find(t => t.id === activeId) || this.promptTemplates[0]
+                this.selectPromptToEdit(activeTpl)
+                this.promptManagerVisible = true
+            },
+            selectPromptToEdit(tpl) {
+                if (!tpl) return
+                this.editingPrompt = JSON.parse(JSON.stringify(tpl))
+            },
+            addNewPrompt() {
+                const newTpl = {
+                    id: 'tpl_custom_' + Date.now(),
+                    name: '新建规划模板',
+                    mode: this.aiPlanForm.mode || 'course',
+                    isDefault: false,
+                    isBuiltin: false,
+                    systemPrompt: '你是一个音频标签整理专家。',
+                    userPrompt: '当前处理目录：{dir_name}\n请针对以下音频文件列表，规划其标准元数据：\n{files}'
+                }
+                this.promptTemplates.push(newTpl)
+                this.selectPromptToEdit(newTpl)
+            },
+            saveEditingPrompt() {
+                if (!this.editingPrompt || !this.editingPrompt.name.trim()) {
+                    this.$cwMessage('模板名称不能为空', 'warning')
+                    return
+                }
+
+                // 如果设为了该模式下的默认，先将该模式下其他模板取消默认
+                if (this.editingPrompt.isDefault) {
+                    this.promptTemplates.forEach(t => {
+                        if (t.mode === this.editingPrompt.mode && t.id !== this.editingPrompt.id) {
+                            t.isDefault = false
+                        }
+                    })
+                }
+
+                const idx = this.promptTemplates.findIndex(t => t.id === this.editingPrompt.id)
+                if (idx !== -1) {
+                    this.$set(this.promptTemplates, idx, JSON.parse(JSON.stringify(this.editingPrompt)))
+                } else {
+                    this.promptTemplates.push(JSON.parse(JSON.stringify(this.editingPrompt)))
+                }
+
+                try {
+                    localStorage.setItem('mtw_prompt_templates', JSON.stringify(this.promptTemplates))
+                } catch (e) {}
+
+                // 同步当前表单提示词
+                if (this.aiPlanForm.templateId === this.editingPrompt.id) {
+                    this.aiPlanForm.systemPrompt = this.editingPrompt.systemPrompt || ''
+                    this.aiPlanForm.userPrompt = this.editingPrompt.userPrompt || ''
+                }
+
+                this.$cwMessage('模板保存成功', 'success')
+            },
+            deleteCurrentPrompt() {
+                if (!this.editingPrompt) return
+                if (this.editingPrompt.isBuiltin) {
+                    this.$cwMessage('系统内置模板不可删除', 'warning')
+                    return
+                }
+                const delId = this.editingPrompt.id
+                this.promptTemplates = this.promptTemplates.filter(t => t.id !== delId)
+                try {
+                    localStorage.setItem('mtw_prompt_templates', JSON.stringify(this.promptTemplates))
+                } catch (e) {}
+                this.$cwMessage('模板已删除', 'success')
+                if (this.promptTemplates.length > 0) {
+                    this.selectPromptToEdit(this.promptTemplates[0])
+                }
+            },
+            // ==================== AI 模型配置 ====================
+            openAiSettings() {
+                this.aiTestStatus = {
+                    tested: false,
+                    success: false,
+                    message: '',
+                    latency: 0,
+                    reply: ''
+                }
+                this.aiSettingsVisible = true
+            },
+            testAiConnection() {
+                if (!this.aiConfig.model || !this.aiConfig.model.trim()) {
+                    this.$cwMessage('请先输入模型名称 (Model Name)', 'warning')
+                    return
+                }
+                this.isTestingAiConnection = true
+                this.aiTestStatus = {
+                    tested: false,
+                    success: false,
+                    message: '',
+                    latency: 0,
+                    reply: ''
+                }
+                this.$api.Task.agentTestConnection({
+                    base_url: this.aiConfig.baseUrl,
+                    api_key: this.aiConfig.apiKey,
+                    model: this.aiConfig.model,
+                    temperature: this.aiConfig.temperature
+                }).then(res => {
+                    if (res && res.result) {
+                        const data = res.data || {}
+                        this.aiTestStatus = {
+                            tested: true,
+                            success: true,
+                            message: res.message || '连接成功，模型响应正常',
+                            latency: data.latency_ms || 0,
+                            reply: data.reply || ''
+                        }
+                        this.$cwMessage(this.aiTestStatus.message, 'success')
+                    } else {
+                        const errMsg = (res ? res.message : '连接测试失败')
+                        this.aiTestStatus = {
+                            tested: true,
+                            success: false,
+                            message: errMsg,
+                            latency: 0,
+                            reply: ''
+                        }
+                        this.$cwMessage('测试未通过: ' + errMsg, 'error')
+                    }
+                }).catch(err => {
+                    const errMsg = '请求异常: ' + (err.message || err)
+                    this.aiTestStatus = {
+                        tested: true,
+                        success: false,
+                        message: errMsg,
+                        latency: 0,
+                        reply: ''
+                    }
+                    this.$cwMessage('测试请求异常', 'error')
+                }).finally(() => {
+                    this.isTestingAiConnection = false
+                })
+            },
+            saveAiConfig() {
+                try {
+                    localStorage.setItem('mtw_ai_config', JSON.stringify(this.aiConfig))
+                } catch (e) {}
+                this.$cwMessage('模型配置已成功保存至本地', 'success')
+                this.aiSettingsVisible = false
+            },
+            clearAiConfig() {
+                this.aiConfig = {
+                    apiKey: '',
+                    baseUrl: 'https://api.openai.com/v1',
+                    model: '',
+                    temperature: 0.2
+                }
+                this.aiTestStatus = {
+                    tested: false,
+                    success: false,
+                    message: '',
+                    latency: 0,
+                    reply: ''
+                }
+                try {
+                    localStorage.removeItem('mtw_ai_config')
+                } catch (e) {}
+                this.$cwMessage('已清空大模型配置，将使用纯本地极速规则引擎', 'primary')
+                this.aiSettingsVisible = false
+            },
+            // ==================== 课程封面智能制作与生成方法 ====================
+            openCourseCoverDialog() {
+                if (!this.filePath) {
+                    this.$cwMessage('请先在左侧选择要制作封面的课程文件夹', 'warning')
+                    return
+                }
+
+                const currentPath = (this.filePath || '').replace(/\\/g, '/').replace(/\/+$/, '')
+                const parts = currentPath.split('/')
+                const dirName = parts[parts.length - 1] || ''
+
+                let suggestedTitle = ''
+                let suggestedAuthor = ''
+                let suggestedCategory = '得到课程'
+                let suggestedStyle = 'amber_dark'
+
+                // 1. 优先统计当前音频列表中的 album 与 artist 标签
+                const albumVotes = {}
+                const artistVotes = {}
+                if (this.folderMusicList && this.folderMusicList.length > 0) {
+                    for (const item of this.folderMusicList) {
+                        const alb = (item.album || '').trim()
+                        if (alb && !alb.includes('未知') && alb !== '未知专辑') {
+                            albumVotes[alb] = (albumVotes[alb] || 0) + 1
+                        }
+                        const art = (item.artist || item.albumartist || '').trim()
+                        if (art && !art.includes('未知') && art !== '未知歌手' && art !== '未知艺术家') {
+                            artistVotes[art] = (artistVotes[art] || 0) + 1
+                        }
+                    }
+                }
+
+                const sortedAlbums = Object.keys(albumVotes).sort((a, b) => albumVotes[b] - albumVotes[a])
+                if (sortedAlbums.length > 0) {
+                    suggestedTitle = sortedAlbums[0]
+                }
+
+                const sortedArtists = Object.keys(artistVotes).sort((a, b) => artistVotes[b] - artistVotes[a])
+                if (sortedArtists.length > 0) {
+                    suggestedAuthor = sortedArtists[0]
+                }
+
+                // 2. 如果标签缺失，从目录名智能解析（如 "267 冯雪·女性健康管理60讲"、"01.吴军·科技史纲60讲"）
+                if (!suggestedTitle || !suggestedAuthor) {
+                    const cleanDir = dirName.replace(/^(\d+[\.\-_ ]+|\[[^\]]+\]|【[^】]+】)/g, '').trim()
+
+                    if (cleanDir.includes('·')) {
+                        const subs = cleanDir.split('·')
+                        if (!suggestedAuthor) suggestedAuthor = subs[0].trim()
+                        if (!suggestedTitle) suggestedTitle = subs.slice(1).join('·').trim()
+                    } else if (cleanDir.includes('-')) {
+                        const subs = cleanDir.split('-')
+                        if (!suggestedTitle) suggestedTitle = subs[0].trim()
+                        if (!suggestedAuthor) suggestedAuthor = subs[1].trim()
+                    } else if (cleanDir.includes('_')) {
+                        const subs = cleanDir.split('_')
+                        if (!suggestedTitle) suggestedTitle = subs[0].trim()
+                        if (!suggestedAuthor) suggestedAuthor = subs.slice(1).join('_').trim()
+                    } else if (!suggestedTitle) {
+                        suggestedTitle = cleanDir
+                    }
+                }
+
+                // 清除标题残余前导数字或标签
+                suggestedTitle = suggestedTitle.replace(/^(\d+[\.\-_ ]+|\[[^\]]+\]|【[^】]+】)/g, '').trim()
+                if (!suggestedTitle) {
+                    suggestedTitle = dirName || '得到课程'
+                }
+
+                // 3. 智能推断顶部徽章分类
+                const fullText = (currentPath + ' ' + suggestedTitle + ' ' + suggestedAuthor).toLowerCase()
+                if (fullText.includes('大师') || fullText.includes('60讲') || fullText.includes('30讲')) {
+                    suggestedCategory = '得到大师课'
+                } else if (fullText.includes('通识')) {
+                    suggestedCategory = '得到通识课'
+                } else if (fullText.includes('精品') || fullText.includes('特辑')) {
+                    suggestedCategory = '得到精品课'
+                } else if (fullText.includes('专栏')) {
+                    suggestedCategory = '得到专栏'
+                } else if (fullText.includes('得到')) {
+                    suggestedCategory = '得到课程'
+                } else {
+                    suggestedCategory = '精品音频课'
+                }
+
+                // 4. 根据课程领域智能匹配专属提示词与配色
+                let suggestedPrompt = ''
+                if (fullText.includes('硅谷') || fullText.includes('来信') || fullText.includes('芯片') || fullText.includes('代码') || fullText.includes('算法') || fullText.includes('编程')) {
+                    suggestedStyle = 'deep_blue'
+                    suggestedPrompt = 'dark navy electronic PCB circuit board background, glowing cyan neon and brushed gold copper conductive tracks, motherboard microchips, a minimalist outline envelope icon made of circuit lines at top center, clean empty dark negative space in the center, radial dark vignette, sleek modern tech graphic design, vector aesthetic, 8k, masterpiece, no text'
+                } else if (fullText.includes('健康') || fullText.includes('医学') || fullText.includes('女性') || fullText.includes('生命') || fullText.includes('心理') || fullText.includes('医疗') || fullText.includes('身体')) {
+                    suggestedStyle = 'emerald'
+                    suggestedPrompt = `modern health and medical science illustration for '${suggestedTitle}', serene healing aesthetic, soft eucalyptus green and warm rose quartz gradient, clean minimalist cellular and organic geometry, elegant soft studio lighting, 3d smooth clay render, 8k masterpiece`
+                } else if (fullText.includes('经济') || fullText.includes('商业') || fullText.includes('管理') || fullText.includes('金融') || fullText.includes('财富') || fullText.includes('投资') || fullText.includes('创业')) {
+                    suggestedStyle = 'amber_dark'
+                    suggestedPrompt = `minimalist modern financial economics book cover background for '${suggestedTitle}', subtle geometric gradient, deep navy and warm gold accent, 3d smooth matte texture, studio lighting, masterpiece, 8k`
+                } else if (fullText.includes('科技') || fullText.includes('ai') || fullText.includes('科学') || fullText.includes('技术') || fullText.includes('计算机') || fullText.includes('宇宙') || fullText.includes('物理') || fullText.includes('数学')) {
+                    suggestedStyle = 'deep_blue'
+                    suggestedPrompt = `deep dark universe tech exploration aesthetic for '${suggestedTitle}', subtle starlight glow, clean minimalist sphere and orbital curves, premium black gold tone, 8k`
+                } else if (fullText.includes('历史') || fullText.includes('政治') || fullText.includes('战争') || fullText.includes('帝国') || fullText.includes('文明')) {
+                    suggestedStyle = 'crimson'
+                    suggestedPrompt = `magnificent epic historical civilization book cover illustration for '${suggestedTitle}', minimalist architectural geometry, warm terracotta red and antique gold gradient, dramatic cinematic studio lighting, 8k`
+                } else if (fullText.includes('哲学') || fullText.includes('艺术') || fullText.includes('音乐') || fullText.includes('文学') || fullText.includes('美学')) {
+                    suggestedStyle = 'purple'
+                    suggestedPrompt = `minimalist abstract humanities art and philosophy book cover background for '${suggestedTitle}', elegant lavender purple and warm amber gradient, clean sculptural curves, contemplative lighting, 8k`
+                } else {
+                    suggestedStyle = 'amber_dark'
+                    suggestedPrompt = `minimalist abstract modern knowledge course cover background for '${suggestedTitle}', geometric gradient, warm amber and clean beige tone, 3d smooth clay texture, studio lighting, masterpiece, 8k`
+                }
+
+                this.coverForm.title = suggestedTitle
+                this.coverForm.author = suggestedAuthor
+                this.coverForm.category = suggestedCategory
+                this.coverForm.style = suggestedStyle
+                this.coverForm.prompt = suggestedPrompt
+                this.coverForm.layout = 'dedao_clean'
+                this.coverForm.comfyui_url = localStorage.getItem('mtw_comfyui_url') || 'http://host.docker.internal:8188'
+                this.courseCoverDialogVisible = true
+            },
+            setCoverPreset(preset) {
+                const title = this.coverForm.title || '课程'
+                const presets = {
+                    '科技电路': 'dark navy electronic PCB circuit board background, glowing cyan neon and brushed gold copper conductive tracks, motherboard microchips, a minimalist outline envelope icon made of circuit lines at top center, clean empty dark negative space in the center, radial dark vignette, sleek modern tech graphic design, vector aesthetic, 8k, masterpiece, no text',
+                    '极简商务': `minimalist abstract modern book cover background for '${title}', subtle geometric gradient, deep navy and warm gold accent, 3d smooth matte texture, studio lighting, masterpiece, 8k`,
+                    '暖色几何': `minimalist abstract geometry illustration for '${title}', warm terracotta amber and beige gradient, clean architectural composition, soft shadows, 8k`,
+                    '深邃探索': `deep dark universe exploration aesthetic for '${title}', subtle starlight glow, clean minimalist sphere and orbital curves, premium black gold tone, 8k`,
+                    '自然治愈': `fresh organic minimalist background for '${title}', soft sage green and eucalyptus tones, clean sunlight diffusion, tranquil aesthetics, 8k`
+                }
+                this.coverForm.prompt = presets[preset] || presets['极简商务']
+                if (preset === '科技电路') {
+                    this.coverForm.layout = 'dedao_clean'
+                }
+            },
+            handleTestComfyui() {
+                const url = (this.coverForm.comfyui_url || '').trim()
+                if (!url) {
+                    this.$cwMessage('请填写 ComfyUI 服务地址', 'warning')
+                    return
+                }
+                this.isTestingComfyui = true
+                this.comfyuiTestResult = null
+                this.$api.Task.testComfyuiConnection({ comfyui_url: url }).then(res => {
+                    this.isTestingComfyui = false
+                    if (res.result) {
+                        this.comfyuiTestResult = { success: true, msg: '✅ ' + res.message }
+                        this.$cwMessage(res.message, 'success')
+                        try {
+                            localStorage.setItem('mtw_comfyui_url', url)
+                        } catch (e) {}
+                    } else {
+                        this.comfyuiTestResult = { success: false, msg: '❌ ' + (res.message || '测试失败') }
+                        this.$cwMessage('连接失败: ' + (res.message || '未知错误'), 'error')
+                    }
+                }).catch(err => {
+                    this.isTestingComfyui = false
+                    this.comfyuiTestResult = { success: false, msg: '❌ 网络异常: ' + (err.message || err) }
+                    this.$cwMessage('连接异常: ' + (err.message || err), 'error')
+                })
+            },
+            handleGenerateCover() {
+                if (!this.coverForm.title.trim()) {
+                    this.$cwMessage('请填写课程主标题', 'warning')
+                    return
+                }
+                if (!this.filePath) {
+                    this.$cwMessage('未检测到当前课程目录路径', 'warning')
+                    return
+                }
+
+                try {
+                    localStorage.setItem('mtw_comfyui_url', this.coverForm.comfyui_url)
+                } catch (e) {}
+
+                this.isGeneratingCover = true
+                this.generateCostSeconds = 0
+                if (this.generateTimer) {
+                    clearInterval(this.generateTimer)
+                }
+                this.generateTimer = setInterval(() => {
+                    this.generateCostSeconds++
+                }, 1000)
+
+                this.$api.Task.generateCourseCover({
+                    folder_path: this.filePath,
+                    title: this.coverForm.title.trim(),
+                    author: this.coverForm.author.trim(),
+                    category: this.coverForm.category.trim() || '得到课程',
+                    prompt: this.coverForm.prompt.trim(),
+                    engine: this.coverForm.engine,
+                    quality: this.coverForm.quality || 'fast',
+                    layout: this.coverForm.layout || 'dedao_clean',
+                    font_size: this.coverForm.font_size || 'auto',
+                    comfyui_url: this.coverForm.comfyui_url.trim(),
+                    style: this.coverForm.style
+                }).then(res => {
+                    if (res.result) {
+                        this.generatedCoverBase64 = res.data.image_base64
+                        let sourceLabel = '极速几何美学引擎'
+                        if (res.data.source === 'comfyui_moss_image') {
+                            sourceLabel = 'ComfyUI (MOSS-Image)'
+                        } else if (res.data.source && res.data.source.includes('fallback')) {
+                            sourceLabel = '几何美学 (ComfyUI超时降级)'
+                            this.$cwMessage('ComfyUI 响应过慢，已自动呈现几何美学专属封面', 'warning')
+                        }
+                        this.generatedCoverMeta = {
+                            source: sourceLabel,
+                            cost_sec: res.data.cost_sec,
+                            title: res.data.title,
+                            author: res.data.author
+                        }
+                        this.$cwMessage('新封面已成功绘制并取回！', 'success')
+                    } else {
+                        this.$cwMessage('生成失败: ' + (res.message || '未知错误'), 'error')
+                    }
+                }).catch(err => {
+                    this.$cwMessage('生成异常: ' + (err.message || err), 'error')
+                }).finally(() => {
+                    if (this.generateTimer) {
+                        clearInterval(this.generateTimer)
+                        this.generateTimer = null
+                    }
+                    this.isGeneratingCover = false
+                })
+            },
+            handleApplyCover() {
+                if (!this.generatedCoverBase64) {
+                    this.$cwMessage('请先生成封面预览', 'warning')
+                    return
+                }
+                this.isSavingCover = true
+                this.$api.Task.applyCourseCover({
+                    folder_path: this.filePath,
+                    image_base64: this.generatedCoverBase64,
+                    embed_to_files: this.coverForm.embed_to_files
+                }).then(res => {
+                    if (res.result) {
+                        this.$cwMessage(res.message || '封面已成功应用！', 'success')
+                        this.courseCoverDialogVisible = false
+                        this.fetchFolderMusicList()
+                    } else {
+                        this.$cwMessage('应用失败: ' + (res.message || '未知错误'), 'error')
+                    }
+                }).catch(err => {
+                    this.$cwMessage('应用异常: ' + (err.message || err), 'error')
+                }).finally(() => {
+                    this.isSavingCover = false
+                })
             }
         }
     }
@@ -4215,5 +5644,787 @@ button.bk-button-text {
     margin-top: 12px;
     display: flex;
     justify-content: flex-end;
+}
+
+/* ==================== AI 智能规划 Agent 样式 ==================== */
+.ai-plan-dialog-body {
+    padding: 10px 6px;
+}
+.ai-plan-target-banner {
+    display: flex;
+    align-items: center;
+    background: #f0f5ff;
+    border: 1px solid #c3d7ff;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+.ai-plan-target-banner .target-title {
+    color: #3a84ff;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.ai-plan-target-banner .target-path {
+    color: #313238;
+    font-family: monospace;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 460px;
+}
+.ai-plan-target-banner .target-count {
+    color: #63656e;
+    margin-left: 8px;
+    white-space: nowrap;
+}
+.ai-section {
+    margin-bottom: 14px;
+}
+.ai-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #313238;
+    margin-bottom: 8px;
+}
+.ai-mode-cards {
+    display: flex;
+    gap: 12px;
+}
+.ai-mode-card {
+    flex: 1;
+    border: 1px solid #dcdee5;
+    border-radius: 6px;
+    padding: 12px;
+    background: #fff;
+    cursor: pointer;
+    transition: all .2s;
+    position: relative;
+}
+.ai-mode-card:hover {
+    border-color: #3a84ff;
+    box-shadow: 0 2px 8px rgba(58, 132, 255, 0.12);
+}
+.ai-mode-card.mode-active {
+    border-color: #3a84ff;
+    background: #f0f5ff;
+    box-shadow: 0 0 0 1px #3a84ff;
+}
+.ai-mode-card .mode-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.ai-mode-card .mode-icon {
+    font-size: 16px;
+    margin-right: 6px;
+}
+.ai-mode-card .mode-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #313238;
+}
+.ai-mode-card .mode-badge {
+    margin-left: auto;
+    font-size: 11px;
+    color: #fff;
+    background: #3a84ff;
+    padding: 1px 6px;
+    border-radius: 10px;
+}
+.ai-mode-card .mode-desc {
+    font-size: 12px;
+    color: #63656e;
+    line-height: 1.5;
+}
+.ai-template-select {
+    width: 100%;
+    height: 32px;
+    line-height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
+    border: 1px solid #c4c6cc;
+    border-radius: 2px;
+    background: #fff;
+    color: #313238;
+    outline: none;
+}
+.ai-template-select:focus {
+    border-color: #3a84ff;
+}
+.ai-custom-prompt-wrap {
+    margin-top: 10px;
+    background: #fafbfd;
+    border: 1px dashed #c4c6cc;
+    border-radius: 4px;
+    padding: 10px 12px;
+}
+.ai-prompt-textarea {
+    width: 100%;
+    padding: 8px;
+    font-size: 12px;
+    border: 1px solid #dcdee5;
+    border-radius: 2px;
+    resize: vertical;
+    box-sizing: border-box;
+    outline: none;
+    font-family: inherit;
+}
+.ai-prompt-textarea:focus {
+    border-color: #3a84ff;
+}
+.ai-engine-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 18px;
+    padding: 10px 14px;
+    background: #fafbfd;
+    border: 1px solid #e1e3e8;
+    border-radius: 4px;
+}
+.ai-engine-banner .engine-info {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+}
+.ai-engine-banner .engine-status {
+    font-weight: 600;
+    margin-right: 6px;
+}
+.ai-engine-banner .engine-local {
+    color: #2dcb56;
+}
+.ai-engine-banner .engine-llm {
+    color: #ff9c00;
+}
+.ai-engine-banner .engine-model-tag {
+    background: #ffe8c3;
+    color: #cf7900;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: monospace;
+    margin-right: 6px;
+}
+.ai-engine-banner .engine-tip {
+    color: #979ba5;
+    font-size: 11px;
+}
+.ai-engine-banner .engine-config-link {
+    font-size: 12px;
+    color: #3a84ff;
+    text-decoration: none;
+}
+.ai-engine-banner .engine-config-link:hover {
+    text-decoration: underline;
+}
+
+/* 规划结果审查与差异确认样式 */
+.plan-review-body {
+    padding: 4px 0;
+}
+.plan-summary-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f5f7fa;
+    border: 1px solid #dcdee5;
+    border-radius: 4px;
+    padding: 8px 14px;
+    margin-bottom: 10px;
+}
+.plan-summary-bar .summary-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.plan-summary-bar .summary-meta-item {
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+}
+.plan-summary-bar .meta-label {
+    color: #63656e;
+}
+.plan-summary-bar .meta-val {
+    color: #313238;
+    font-weight: 600;
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.plan-summary-bar .meta-val.highlight {
+    color: #3a84ff;
+}
+.plan-summary-bar .meta-sub {
+    color: #63656e;
+    margin-left: 4px;
+}
+.plan-summary-bar .meta-badge.badge-cover {
+    background: #e5f6ea;
+    color: #2dcb56;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+.plan-summary-bar .summary-stat-pill {
+    font-size: 12px;
+    background: #e1ecff;
+    color: #3a84ff;
+    padding: 3px 10px;
+    border-radius: 12px;
+}
+.plan-toolbar-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 2px;
+}
+.plan-toolbar-bar .plan-tools-left {
+    display: flex;
+    align-items: center;
+}
+.plan-toolbar-bar .toolbar-sep {
+    color: #dcdee5;
+    margin: 0 12px;
+}
+.plan-toolbar-bar .filter-label {
+    font-size: 12px;
+    color: #63656e;
+    margin-right: 8px;
+}
+.plan-table-wrap {
+    max-height: 480px;
+    overflow-y: auto;
+    border: 1px solid #dcdee5;
+    border-radius: 4px;
+    margin-top: 8px;
+    background: #fff;
+}
+.plan-diff-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.plan-diff-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #fafbfd;
+    color: #63656e;
+    font-weight: 600;
+    padding: 8px 10px;
+    border-bottom: 1px solid #dcdee5;
+    border-right: 1px solid #f0f1f5;
+    text-align: left;
+}
+.plan-diff-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #f0f1f5;
+    border-right: 1px solid #f5f6fa;
+    vertical-align: middle;
+}
+.plan-diff-table tr.row-unselected {
+    opacity: 0.55;
+    background: #fbfbfc;
+}
+.plan-diff-table tr.row-edited {
+    background: #fffef0;
+}
+.plan-cell-input {
+    width: 100%;
+    height: 28px;
+    line-height: 26px;
+    padding: 0 8px;
+    font-size: 12px;
+    border: 1px solid #c4c6cc;
+    border-radius: 2px;
+    background: #fff;
+    box-sizing: border-box;
+    transition: border-color .2s;
+}
+.plan-cell-input:focus {
+    border-color: #3a84ff;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(58, 132, 255, 0.15);
+}
+.plan-track-input {
+    text-align: center;
+    font-weight: 600;
+    color: #3a84ff;
+    font-family: monospace;
+}
+.plan-title-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.plan-title-input {
+    font-weight: 500;
+}
+.plan-orig-hint {
+    font-size: 11px;
+    color: #ea3636;
+    background: #fdeeee;
+    padding: 1px 4px;
+    border-radius: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.plan-file-hint {
+    font-size: 11px;
+    color: #979ba5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.badge-cover-yes {
+    display: inline-block;
+    font-size: 11px;
+    background: #e5f6ea;
+    color: #2dcb56;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+}
+.badge-cover-none {
+    color: #c4c6cc;
+    font-size: 11px;
+}
+.plan-cleanups-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.conf-badge-row {
+    display: flex;
+    align-items: center;
+}
+.conf-tag {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+.conf-tag.conf-high {
+    background: #e5f6ea;
+    color: #2dcb56;
+}
+.conf-tag.conf-med {
+    background: #fff3e1;
+    color: #ff9c00;
+}
+.conf-tag.conf-low {
+    background: #fee;
+    color: #ea3636;
+}
+.cleanup-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+}
+.cleanup-pill {
+    font-size: 10px;
+    background: #f0f1f5;
+    color: #63656e;
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+.plan-reason-text {
+    font-size: 11px;
+    color: #979ba5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.plan-review-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+.plan-review-footer .review-footer-left {
+    font-size: 13px;
+    color: #63656e;
+}
+.plan-review-footer .review-footer-left strong {
+    color: #3a84ff;
+    font-size: 15px;
+}
+
+/* 提示词模板管理样式 */
+.prompt-manager-body {
+    display: flex;
+    gap: 16px;
+    height: 480px;
+}
+.pm-left-col {
+    width: 250px;
+    border: 1px solid #dcdee5;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    background: #fafbfd;
+}
+.pm-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid #dcdee5;
+    font-size: 13px;
+    font-weight: 600;
+    color: #313238;
+}
+.pm-list-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+}
+.pm-tpl-item {
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    background: #fff;
+    transition: all .15s;
+}
+.pm-tpl-item:hover {
+    border-color: #c4c6cc;
+}
+.pm-tpl-item.tpl-active {
+    border-color: #3a84ff;
+    background: #e1ecff;
+}
+.pm-item-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+.pm-tpl-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #313238;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pm-mode-tag {
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+.pm-mode-tag.course {
+    background: #e1ecff;
+    color: #3a84ff;
+}
+.pm-mode-tag.music {
+    background: #f2eafd;
+    color: #7c42f0;
+}
+.pm-item-bottom {
+    display: flex;
+    gap: 6px;
+    font-size: 10px;
+}
+.pm-default-badge {
+    color: #ff9c00;
+    font-weight: 600;
+}
+.pm-builtin-badge {
+    color: #979ba5;
+}
+.pm-custom-badge {
+    color: #2dcb56;
+}
+.pm-list-footer {
+    padding: 8px;
+    border-top: 1px solid #dcdee5;
+}
+.pm-right-col {
+    flex: 1;
+    border: 1px solid #dcdee5;
+    border-radius: 4px;
+    padding: 14px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+}
+.pm-form-row {
+    margin-bottom: 12px;
+}
+.pm-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #313238;
+    margin-bottom: 6px;
+}
+.pm-textarea {
+    width: 100%;
+    padding: 8px;
+    font-size: 12px;
+    border: 1px solid #c4c6cc;
+    border-radius: 2px;
+    font-family: inherit;
+    box-sizing: border-box;
+    outline: none;
+    resize: vertical;
+}
+.pm-textarea:focus {
+    border-color: #3a84ff;
+}
+.pm-actions-bar {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    padding-top: 10px;
+    border-top: 1px solid #f0f1f5;
+}
+
+/* AI 设置样式 */
+.ai-settings-body {
+    padding: 6px 4px;
+}
+.ai-settings-notice {
+    display: flex;
+    align-items: flex-start;
+    background: #f0f5ff;
+    border: 1px solid #c3d7ff;
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: #313238;
+    line-height: 1.5;
+    margin-bottom: 16px;
+}
+.ai-setting-row {
+    margin-bottom: 14px;
+}
+.ai-setting-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #313238;
+    margin-bottom: 6px;
+}
+.ai-setting-tip {
+    font-size: 11px;
+    color: #979ba5;
+    margin-top: 4px;
+}
+.ai-setting-tip code {
+    background: #f0f1f5;
+    padding: 1px 4px;
+    border-radius: 2px;
+    color: #3a84ff;
+}
+
+/* 连通性测试结果面板样式 */
+.ai-test-result-box {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.5;
+    transition: all .2s;
+}
+.ai-test-result-box.test-success {
+    background: #f2fff4;
+    border: 1px solid #94ebaf;
+    color: #1a7a37;
+}
+.ai-test-result-box.test-failed {
+    background: #fff3f3;
+    border: 1px solid #fecaca;
+    color: #b91c1c;
+}
+.ai-test-result-box .result-header {
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+.ai-test-result-box .result-latency {
+    margin-left: auto;
+    font-family: monospace;
+    font-size: 11px;
+    background: rgba(0, 0, 0, 0.05);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+.ai-test-result-box .result-message {
+    margin-bottom: 4px;
+    word-break: break-all;
+}
+.ai-test-result-box .result-reply {
+    font-size: 11px;
+    color: #555;
+    margin-top: 4px;
+    word-break: break-all;
+}
+.ai-test-result-box .result-reply code {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: monospace;
+}
+
+/* 课程专属封面弹窗样式 */
+.course-cover-dialog-body {
+    display: flex;
+    gap: 20px;
+    min-height: 480px;
+    padding: 10px 0;
+}
+.cover-left-pane {
+    flex: 1.15;
+    display: flex;
+    flex-direction: column;
+}
+.cover-right-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: #f8fafc;
+    border-radius: 8px;
+    padding: 16px;
+    border: 1px dashed #cbd5e1;
+}
+.cover-preview-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+.cover-img-box {
+    position: relative;
+    width: 320px;
+    height: 320px;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    border: 2px solid #fff;
+    background: #1e293b;
+}
+.cover-loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(4px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    text-align: center;
+    padding: 20px;
+}
+@keyframes coverSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+.spin-icon {
+    animation: coverSpin 1s linear infinite;
+    display: inline-block;
+}
+.cover-img-box img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.cover-empty-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 320px;
+    width: 100%;
+}
+.cover-meta-bar {
+    margin-top: 14px;
+    font-size: 12px;
+    color: #475569;
+    background: #fff;
+    padding: 6px 14px;
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.cover-dialog-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+.preset-pills {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.pill-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    background: #e2e8f0;
+    color: #334155;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.pill-tag:hover {
+    background: #3a84ff;
+    color: #fff;
+}
+.form-group-row {
+    display: flex;
+    width: 100%;
+}
+.form-group-item {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 10px;
+}
+.form-label {
+    font-size: 12px;
+    font-weight: bold;
+    color: #334155;
+    margin-bottom: 4px;
+}
+.bk-form-textarea {
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 12px;
+    resize: vertical;
+    outline: none;
+    font-family: inherit;
+}
+.bk-form-textarea:focus {
+    border-color: #3a84ff;
+}
+.bk-form-select {
+    height: 32px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 0 8px;
+    font-size: 12px;
+    outline: none;
+    background: #fff;
+}
+.bk-form-select:focus {
+    border-color: #3a84ff;
 }
 </style>
